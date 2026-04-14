@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, sans-serif;
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d27;
+  --bg-card: #21242f;
+  --border-color: #2d3140;
+  --text-primary: #e4e6ec;
+  --text-secondary: #8b8fa3;
+  --accent: #0a7eff;
+  --accent-soft: rgba(10, 126, 255, 0.12);
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+code, pre {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* Markdown content styling */
+.markdown-content h2 { font-size: 1.25rem; font-weight: 600; margin: 1rem 0 0.5rem; color: var(--text-primary); }
+.markdown-content h3 { font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.375rem; color: var(--text-primary); }
+.markdown-content p { margin: 0.375rem 0; line-height: 1.6; color: var(--text-secondary); }
+.markdown-content ul, .markdown-content ol { margin: 0.375rem 0; padding-left: 1.5rem; }
+.markdown-content li { margin: 0.25rem 0; color: var(--text-secondary); }
+.markdown-content table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.875rem; }
+.markdown-content th { background: var(--bg-secondary); padding: 0.5rem 0.75rem; text-align: left; border: 1px solid var(--border-color); font-weight: 600; }
+.markdown-content td { padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); }
+.markdown-content code { background: var(--bg-secondary); padding: 0.125rem 0.375rem; border-radius: 4px; font-size: 0.85em; }
+.markdown-content pre { background: var(--bg-secondary); padding: 0.75rem; border-radius: 8px; overflow-x: auto; }
+.markdown-content strong { color: var(--text-primary); }
+.markdown-content hr { border: none; border-top: 1px solid var(--border-color); margin: 0.75rem 0; }

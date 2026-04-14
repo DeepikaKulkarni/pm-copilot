@@ -1,0 +1,8 @@
+{
+    "country": "SG",
+    "regulation_name": "PDPA",
+    "document_type": "regulation_text",
+    "source_url": "https://www.pdpc.gov.sg/overview-of-pdpa",
+    "section_topics": ["data_collection", "consent", "data_transfer", "breach_notification", "enforcement"],
+    "year": 2012
+}
