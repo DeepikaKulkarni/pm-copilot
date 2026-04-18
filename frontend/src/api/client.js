@@ -76,6 +76,15 @@ export const conversationApi = {
   },
 };
 
+// ── Response feedback ───────────────────────────────────────────────────────
+
+export const feedbackApi = {
+  submit: async (liked, query, agent) => {
+    const res = await api.post('/feedback', { liked, query, agent });
+    return res.data;
+  },
+};
+
 // ── File upload ─────────────────────────────────────────────────────────────
 // Uses raw axios (not the shared instance) so multipart/form-data isn't overridden.
 

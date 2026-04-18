@@ -7,13 +7,34 @@ import mermaid from 'mermaid';
 import {
   Send, Sun, Moon, Trash2, FileText, Clock, Cpu, Database, Search,
   Zap, BarChart3, GitCompare, MessageSquare, LayoutDashboard, Box,
-  Download, AlertTriangle, CheckCircle, XCircle, Loader2,
+  Download, AlertTriangle, CheckCircle, XCircle, Loader2, ThumbsUp, ThumbsDown, ExternalLink,
 } from 'lucide-react';
-import { chatApi, contextApi, uploadApi } from './api/client';
+import { chatApi, contextApi, uploadApi, feedbackApi } from './api/client';
 import LandingPage from './LandingPage';
 
 // Initialize mermaid once at module load; theme is re-synced on every dark/light toggle.
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+
+// Persists state to localStorage so values survive a page refresh.
+// Reads the stored value lazily (function initializer) to avoid parsing on every render.
+function usePersistedState(key, defaultValue) {
+  const [state, setState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch {}
+  }, [key, state]);
+
+  return [state, setState];
+}
 
 // ── Static config ─────────────────────────────────────────────────────────────
 
@@ -483,6 +504,7 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
             totalTime: res.total_time_ms?.toFixed(0),
             src: res.retrieval_source, conf: res.rag_confidence || 0,
             followUps: res.follow_up_questions || [],
+            sources: res.sources || [],
           }]);
         } catch (e) {
           setMsgs(p => [...p, { role: 'assistant', content: `**Error:** ${e.message}`, agent: 'supervisor' }]);
@@ -492,6 +514,14 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
     } catch (e) {
       setMsgs(p => [...p, { role: 'assistant', content: `**Upload error:** ${e.message}`, agent: 'supervisor' }]);
     }
+  };
+
+  const handleFeedback = async (idx, liked) => {
+    // Optimistically mark the message so the buttons disappear immediately
+    setMsgs(p => p.map((m, i) => i === idx ? { ...m, feedback: liked } : m));
+    try {
+      await feedbackApi.submit(liked, msgs[idx - 1]?.content || '', msgs[idx]?.agent);
+    } catch {}
   };
 
   const send = async (txt) => {
@@ -507,6 +537,7 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
         totalTime: r.total_time_ms?.toFixed(0),
         src: r.retrieval_source, conf: r.rag_confidence || 0,
         followUps: r.follow_up_questions || [],
+        sources: r.sources || [],
       }]);
     } catch (e) {
       setMsgs(p => [...p, { role: 'assistant', content: `**Error:** ${e.message}`, agent: 'supervisor' }]);
@@ -532,7 +563,7 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
         ) : (
           <div style={{ maxWidth: 780, margin: '0 auto' }}>
             {msgs.map((m, i) => (
-              <div key={i} className={`row ${m.role === 'user' ? 'u' : ''}`}>
+              <div key={i} data-msg-idx={i} className={`row ${m.role === 'user' ? 'u' : ''}`}>
                 <div className={`bub ${m.role === 'user' ? 'u' : 'a'}`}>
                   {m.role !== 'user' && (
                     <MetricChips data={{ agent: m.agent, model: m.model, time: m.totalTime, src: m.src, conf: m.conf }} />
@@ -540,25 +571,102 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
                   {m.role === 'user' ? (
                     <div>
                       {m.imageData && (
-                        <img src={m.imageData} alt="uploaded"
-                          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 6, display: 'block', marginBottom: m.content ? 6 : 0 }} />
+                        // Wrap image in a relative container so the download overlay sits inside it
+                        <div style={{ position: 'relative', display: 'inline-block', marginBottom: m.content ? 6 : 0 }}>
+                          <img src={m.imageData} alt="uploaded"
+                            style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 6, display: 'block' }} />
+                          <a href={m.imageData}
+                            download={`pm-image-${i}.${m.imageData.split(';')[0].split('/')[1] || 'png'}`}
+                            style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,0.55)', borderRadius: 4, padding: '3px 8px', color: '#fff', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4, textDecoration: 'none', lineHeight: 1 }}>
+                            <Download size={10} /> Save
+                          </a>
+                        </div>
                       )}
                       {m.content && <p style={{ margin: 0, lineHeight: 1.6 }}>{m.content}</p>}
                     </div>
                   ) : (
                     <>
                       <Md content={m.content} />
-                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+
+                      {/* Sources — collapsible list of RAG docs / web pages used */}
+                      {m.sources?.length > 0 && (
+                        <details className="sources-box">
+                          <summary className="sources-toggle">
+                            <Database size={10} /> {m.sources.length} source{m.sources.length !== 1 ? 's' : ''}
+                          </summary>
+                          <div className="sources-list">
+                            {m.sources.map((s, j) => (
+                              <a key={j} href={s.url} target="_blank" rel="noopener noreferrer" className="source-item">
+                                {s.type === 'document' ? <Database size={9} /> : <ExternalLink size={9} />}
+                                <span className="source-title">{s.title}</span>
+                                {s.confidence != null && (
+                                  <span className="source-conf">{(s.confidence * 100).toFixed(0)}%</span>
+                                )}
+                              </a>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {/* Action row: export + human-in-the-loop feedback */}
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         <button className="fuchip" style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
                           onClick={() => {
-                            const md = `# PM Copilot Report\n\n## Query\n${msgs[i-1]?.content || ''}\n\n## Analysis\n${m.content}\n\n---\n*Agent: ${m.agent} | Model: ${m.model} | Time: ${m.totalTime}ms*`;
-                            const blob = new Blob([md], { type: 'text/markdown' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a'); a.href = url; a.download = `pm-report-${Date.now()}.md`;
-                            a.click(); URL.revokeObjectURL(url);
+                            const bodyHtml = document.querySelector(`[data-msg-idx="${i}"] .md`)?.innerHTML
+                              || `<pre>${m.content.replace(/</g, '&lt;')}</pre>`;
+                            const query = msgs[i - 1]?.content || '';
+                            const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>PM Copilot Report</title><style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:820px;margin:40px auto;padding:0 24px;color:#1a1a1a;line-height:1.65}
+h1{font-size:22px;margin-bottom:2px}
+h2{font-size:16px;color:#4a5e4e;border-bottom:1px solid #ddd;padding-bottom:5px;margin-top:28px}
+h3{font-size:14px}h4{font-size:13px}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:13px}
+th,td{border:1px solid #ccc;padding:7px 11px;text-align:left}
+th{background:#f2f2f2;font-weight:600}
+code{background:#f3f3f3;padding:2px 5px;border-radius:3px;font-family:monospace;font-size:12px}
+pre{background:#f3f3f3;padding:14px;border-radius:6px;overflow-x:auto}
+pre code{background:none;padding:0}
+ul,ol{padding-left:20px}li{margin:3px 0}
+blockquote{margin:0;padding-left:12px;border-left:3px solid #ccc;color:#555}
+.meta{font-size:11px;color:#888;margin-top:28px;border-top:1px solid #eee;padding-top:10px}
+@media print{body{margin:20px}}
+</style></head><body>
+<h1>PM Copilot Report</h1>
+${query ? `<h2>Query</h2><p><em>${query.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</em></p>` : ''}
+<h2>Analysis</h2>
+${bodyHtml}
+<div class="meta">Agent: ${m.agent || '—'} &nbsp;|&nbsp; Model: ${m.model || '—'} &nbsp;|&nbsp; ${new Date().toLocaleString()}</div>
+</body></html>`;
+                            const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+                            const win = window.open(blobUrl, '_blank', 'width=900,height=700');
+                            if (!win) { URL.revokeObjectURL(blobUrl); return; }
+                            win.onload = () => { win.print(); URL.revokeObjectURL(blobUrl); };
                           }}>
-                          <Download size={10} /> Export .md
+                          <Download size={10} /> Export PDF
                         </button>
+
+                        <div className="feedback-row">
+                          {m.feedback == null ? (
+                            <>
+                              <span className="feedback-label">Helpful?</span>
+                              <button className="feedback-btn" title="Yes, helpful"
+                                onClick={() => handleFeedback(i, true)}>
+                                <ThumbsUp size={12} />
+                              </button>
+                              <button className="feedback-btn" title="Not helpful"
+                                onClick={() => handleFeedback(i, false)}>
+                                <ThumbsDown size={12} />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="feedback-done">
+                              {m.feedback
+                                ? <><ThumbsUp size={11} /> Thanks!</>
+                                : <><ThumbsDown size={11} /> Noted, we'll improve</>}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </>
                   )}
@@ -610,6 +718,10 @@ function MetricsView() {
           <h2 className="view-title">System Metrics</h2>
           <p className="view-desc">Performance monitoring and model usage statistics</p>
         </div>
+        <button className="btn-secondary" style={{ color: 'var(--coral)' }}
+          onClick={() => { localStorage.clear(); window.location.reload(); }}>
+          <Trash2 size={13} /> Reset App
+        </button>
       </div>
       <div className="metrics-grid">
         <div className="metric-card">
@@ -677,26 +789,26 @@ function MetricsView() {
 
 // Owns all cross-tab state, dark/light theming, and the landing → app transition.
 export default function App() {
-  const [entered, setEntered] = useState(false);
-  const [tab, setTab] = useState('dashboard');
-  const [dark, setDark] = useState(true);
+  const [entered, setEntered] = usePersistedState('pm-entered', false);
+  const [tab, setTab] = usePersistedState('pm-tab', 'dashboard');
+  const [dark, setDark] = usePersistedState('pm-dark', true);
   const [preloadQuery, setPreloadQuery] = useState(null);
-  const [chatMsgs, setChatMsgs] = useState([]);
+  const [chatMsgs, setChatMsgs] = usePersistedState('pm-chat', []);
   const [chatBusy, setChatBusy] = useState(false);
 
   // Dashboard state
-  const [dashResults, setDashResults] = useState({});
+  const [dashResults, setDashResults] = usePersistedState('pm-dash', {});
   const [dashLoading, setDashLoading] = useState({});
 
   // Compare state
-  const [compareResult, setCompareResult] = useState(null);
+  const [compareResult, setCompareResult] = usePersistedState('pm-compare', null);
   const [compareMeta, setCompareMeta] = useState(null);
 
   // Architecture state
-  const [archCtx, setArchCtx] = useState('');
+  const [archCtx, setArchCtx] = usePersistedState('pm-arch-ctx', '');
   const [archSaved, setArchSaved] = useState(false);
-  const [archResult, setArchResult] = useState(null);
-  const [archDiagram, setArchDiagram] = useState(null);
+  const [archResult, setArchResult] = usePersistedState('pm-arch-result', null);
+  const [archDiagram, setArchDiagram] = usePersistedState('pm-arch-diagram', null);
   const [archMeta, setArchMeta] = useState(null);
   const [archImages, setArchImages] = useState([]);
 

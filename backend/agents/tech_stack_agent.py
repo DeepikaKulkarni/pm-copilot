@@ -47,6 +47,7 @@ def explain_tech_stack(
     web_context = ""
     search_time = 0.0
     retrieval_source = "none"
+    sources = []
 
     try:
         search_result = web_search.search(
@@ -59,6 +60,10 @@ def explain_tech_stack(
         if search_result.get("results"):
             web_context = web_search.format_context(search_result)
             retrieval_source = "web_search"
+            sources = [
+                {"type": "web", "title": r.get("title", r["url"]), "url": r["url"]}
+                for r in search_result["results"] if r.get("url")
+            ]
     except Exception as e:
         print(f"Tech stack web search failed: {e}")
         web_context = ""
@@ -89,4 +94,5 @@ def explain_tech_stack(
         "retrieval_source": retrieval_source,
         "search_time_ms": round(search_time, 2),
         "total_time_ms": round(total_time, 2),
+        "sources": sources,
     }

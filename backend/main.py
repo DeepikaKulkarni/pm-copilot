@@ -55,10 +55,17 @@ class ChatResponse(BaseModel):
     follow_up_questions: list = []
     hallucination_check: Optional[dict] = None
     structure_check: Optional[dict] = None
+    sources: list = []
 
 
 class ArchitectureContextRequest(BaseModel):
     context: str
+
+
+class FeedbackRequest(BaseModel):
+    liked: bool
+    query: Optional[str] = None
+    agent: Optional[str] = None
 
 
 # --- In-memory state ---
@@ -111,6 +118,14 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "timestamp": time.time()}
+
+
+@app.post("/api/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """Record a thumbs-up / thumbs-down on a single assistant response."""
+    sentiment = "👍" if request.liked else "👎"
+    print(f"[Feedback] {sentiment}  agent={request.agent}  query={str(request.query or '')[:80]}")
+    return {"status": "recorded"}
 
 
 @app.get("/api/countries")

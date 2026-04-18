@@ -1,7 +1,7 @@
 """
 Action Plan Agent.
 Generates stakeholder checklists, next steps, and release decision summaries.
-Uses Claude for structured, stakeholder-ready output.
+Uses GPT-4 for structured, stakeholder-ready output.
 """
 from langchain_core.messages import HumanMessage, SystemMessage
 from typing import Optional
@@ -25,7 +25,7 @@ def generate_action_plan(
         {
             "response": str,
             "agent": "action_plan",
-            "model_used": "claude-sonnet-4-20250514",
+            "model_used": "gpt-4",
         }
     """
     llm = get_action_plan_llm()
@@ -46,5 +46,6 @@ def generate_action_plan(
     return {
         "response": response.content,
         "agent": "action_plan",
-        "model_used": "claude-sonnet-4-20250514",
+        "model_used": "gpt-4",
+        "sources": [],
     }

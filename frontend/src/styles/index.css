@@ -490,3 +490,102 @@ code, pre { font-family: var(--mono); }
   .landing-steps { grid-template-columns: 1fr; }
   .landing-section { padding: 40px 16px; }
 }
+
+/* ── Sources ──────────────────────────────────────────────────────────────── */
+
+.sources-box {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sources-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--tx-3);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  background: var(--bg-2);
+}
+.sources-toggle::-webkit-details-marker { display: none; }
+.sources-toggle:hover { color: var(--tx-2); }
+
+.sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+  background: var(--bg-1);
+}
+
+.source-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  color: var(--tx-2);
+  text-decoration: none;
+  transition: background 0.1s;
+}
+.source-item:hover { background: var(--bg-2); color: var(--sage); }
+
+.source-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-conf {
+  font-size: 10px;
+  color: var(--tx-3);
+  background: var(--bg-3);
+  border-radius: 3px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+/* ── Feedback ─────────────────────────────────────────────────────────────── */
+
+.feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.feedback-label {
+  font-size: 11px;
+  color: var(--tx-3);
+}
+
+.feedback-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--tx-3);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.feedback-btn:hover:first-of-type { background: var(--green-dim); color: var(--green); border-color: var(--green); }
+.feedback-btn:hover:last-of-type  { background: var(--coral-dim); color: var(--coral); border-color: var(--coral); }
+
+.feedback-done {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--tx-3);
+}

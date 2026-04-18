@@ -47,6 +47,7 @@ def map_architecture(
     web_context = ""
     search_time = 0.0
     retrieval_source = "none"
+    sources = []
 
     # Extract technology names from entities or query for targeted search
     search_query = question
@@ -65,6 +66,10 @@ def map_architecture(
         if search_result.get("results"):
             web_context = web_search.format_context(search_result)
             retrieval_source = "web_search"
+            sources = [
+                {"type": "web", "title": r.get("title", r["url"]), "url": r["url"]}
+                for r in search_result["results"] if r.get("url")
+            ]
     except Exception as e:
         print(f"Architecture web search failed: {e}")
         web_context = ""
@@ -95,4 +100,5 @@ def map_architecture(
         "retrieval_source": retrieval_source,
         "search_time_ms": round(search_time, 2),
         "total_time_ms": round(total_time, 2),
+        "sources": sources,
     }

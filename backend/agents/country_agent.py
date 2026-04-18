@@ -1,7 +1,7 @@
 """
 Country Readiness Agent (merged with Risk Scoring).
 Assesses launch readiness for specific countries.
-Uses Claude for nuanced regulatory analysis and compliance reasoning.
+Uses GPT-4 for nuanced regulatory analysis and compliance reasoning.
 Integrates RAG retrieval + web search fallback.
 """
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -59,7 +59,7 @@ def assess_country_readiness(
         {
             "response": str,
             "agent": "country_readiness",
-            "model_used": "claude-sonnet-4-20250514",
+            "model_used": "gpt-4",
             "retrieval_source": "rag" | "web_search" | "hybrid",
             "rag_confidence": float,
             "retrieval_time_ms": float,
@@ -76,6 +76,8 @@ def assess_country_readiness(
     rag_confidence = 0.0
     total_retrieval_time = 0.0
 
+    sources = []
+
     for country in countries:
         # Step 1: Try RAG retrieval
         rag_result = retriever.retrieve(query=question, country_filter=country)
@@ -85,6 +87,16 @@ def assess_country_readiness(
         rag_context = retriever.format_context(rag_result)
         all_contexts.append(f"--- RAG Results for {country} ---\n{rag_context}")
 
+        # Collect RAG sources — only include chunks above a minimum confidence score
+        for meta, score in zip(rag_result["metadatas"], rag_result["scores"]):
+            if score > 0.25 and meta.get("source_url"):
+                sources.append({
+                    "type": "document",
+                    "title": f"{meta.get('regulation_name', 'Compliance Doc')} ({meta.get('country', country)})",
+                    "url": meta.get("source_url", ""),
+                    "confidence": round(score, 2),
+                })
+
         # Step 2: Web search fallback if confidence is low
         if rag_result["needs_web_fallback"]:
             retrieval_source = "hybrid"
@@ -92,6 +104,19 @@ def assess_country_readiness(
             total_retrieval_time += web_result.get("search_time_ms", 0)
             web_context = web_search.format_context(web_result)
             all_contexts.append(f"--- Web Search Results for {country} ---\n{web_context}")
+
+            # Collect web search sources
+            for r in web_result.get("results", [])[:3]:
+                if r.get("url"):
+                    sources.append({
+                        "type": "web",
+                        "title": r.get("title", r["url"]),
+                        "url": r["url"],
+                    })
+
+    # Deduplicate by URL while preserving relevance order
+    seen_urls: set = set()
+    unique_sources = [s for s in sources if s["url"] not in seen_urls and not seen_urls.add(s["url"])]
 
     compliance_context = "\n\n".join(all_contexts)
 
@@ -116,10 +141,11 @@ def assess_country_readiness(
     return {
         "response": response.content,
         "agent": "country_readiness",
-        "model_used": "claude-sonnet-4-20250514",
+        "model_used": "gpt-4",
         "retrieval_source": retrieval_source,
         "rag_confidence": rag_confidence,
         "retrieval_time_ms": round(total_retrieval_time, 2),
         "total_time_ms": round(total_time, 2),
         "countries_analyzed": countries,
+        "sources": unique_sources[:8],
     }

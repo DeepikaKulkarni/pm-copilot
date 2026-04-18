@@ -375,4 +375,5 @@ def run_copilot(
         "step_log": result.get("step_log", []),
         "routing_decision": result.get("routing_decision"),
         "needs_clarification": False,
+        "sources": primary.get("sources", []),
     }
