@@ -231,7 +231,7 @@ def format_output_node(state: CopilotState) -> dict:
     metadata_footer += "*"
 
     return {
-        "combined_response": response + metadata_footer,
+        "combined_response": response,
         "total_time_ms": round(total_time, 2),
     }
 

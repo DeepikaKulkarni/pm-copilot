@@ -42,7 +42,8 @@ def _extract_countries_from_query(question: str, extracted_entities: Optional[di
             if any(kw in question_lower for kw in keywords):
                 countries.append(code)
 
-    return countries if countries else ["US"]  # Default to US if no country detected
+    # US default keeps the response useful when no country is mentioned rather than failing
+    return countries if countries else ["US"]
 
 
 def assess_country_readiness(

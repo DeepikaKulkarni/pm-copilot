@@ -1,564 +1,751 @@
+// Main application component for the Technical PM Launch & Architecture Copilot.
+// All view-level state is lifted here so tab switches don't reset data.
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { chatApi, contextApi } from './api/client';
+import remarkGfm from 'remark-gfm';
+import mermaid from 'mermaid';
+import {
+  Send, Sun, Moon, Trash2, FileText, Clock, Cpu, Database, Search,
+  Zap, BarChart3, GitCompare, MessageSquare, LayoutDashboard, Box,
+  Download, AlertTriangle, CheckCircle, XCircle, Loader2,
+} from 'lucide-react';
+import { chatApi, contextApi, uploadApi } from './api/client';
+import LandingPage from './LandingPage';
 
-/* ─── Icons ─── */
-const SendIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>;
-const SparkleIcon = ({ size=14 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/></svg>;
-const MoonIcon   = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>;
-const SunIcon    = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>;
-const ChevronLeft  = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
-const ChevronRight = () => <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>;
-const LayersIcon   = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>;
-const TrashIcon    = () => <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>;
-const XIcon        = () => <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+// Initialize mermaid once at module load; theme is re-synced on every dark/light toggle.
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
-/* ─── Sidebar nav — add new tabs here, the icon rail handles them automatically ─── */
-const TABS = [
-  { id:'context',   label:'Context',   icon:'📄' },
-  { id:'countries', label:'Countries', icon:'🌍' },
-  { id:'agents',    label:'Agents',    icon:'🤖' },
-];
+// ── Static config ─────────────────────────────────────────────────────────────
 
-/* ─── Config ─── */
+// Maps backend agent_used values → display label + accent colour
 const AGENTS = {
-  tech_stack_explainer: { color:'#10b981', label:'Tech Stack',       emoji:'⚙️' },
-  architecture_mapper:  { color:'#8b5cf6', label:'Architecture',     emoji:'🏗️' },
-  country_readiness:    { color:'#f59e0b', label:'Country Readiness', emoji:'🌍' },
-  action_plan:          { color:'#ef4444', label:'Action Plan',       emoji:'📋' },
-  supervisor:           { color:'#6366f1', label:'Supervisor',        emoji:'🤖' },
+  tech_stack_explainer: { color: 'var(--sky)',   label: 'Tech Stack' },
+  architecture_mapper:  { color: 'var(--lilac)', label: 'Architecture' },
+  country_readiness:    { color: 'var(--sand)',  label: 'Compliance' },
+  action_plan:          { color: 'var(--coral)', label: 'Action Plan' },
+  supervisor:           { color: 'var(--tx-3)',  label: 'Routing' },
 };
 
-const FEATURES = [
-  { icon:'⚙️', title:'Tech Stack Explainer', desc:'Translate engineering jargon into PM language instantly', color:'#10b981', prompt:'What is Kubernetes and why does it matter for PMs?' },
-  { icon:'🏗️', title:'Architecture Mapper',  desc:'Visualise service dependencies and design trade-offs',  color:'#8b5cf6', prompt:'What are the key dependencies in a microservices architecture?' },
-  { icon:'🌍', title:'Country Readiness',    desc:'Check compliance requirements for 6 global markets',    color:'#f59e0b', prompt:'Compare launch readiness for India vs Germany' },
-  { icon:'📋', title:'Action Plan Generator',desc:'Create stakeholder-ready launch checklists in seconds',  color:'#ef4444', prompt:'Generate an action plan for launching in all 6 countries' },
-];
-
+// Six markets covered by the compliance RAG corpus
 const COUNTRIES = [
-  { flag:'🇺🇸', name:'United States', code:'US', reg:'CCPA',  color:'#3b82f6' },
-  { flag:'🇩🇪', name:'Germany',       code:'DE', reg:'GDPR',  color:'#f59e0b' },
-  { flag:'🇮🇳', name:'India',         code:'IN', reg:'DPDP',  color:'#f97316' },
-  { flag:'🇸🇦', name:'Saudi Arabia',  code:'SA', reg:'PDPL',  color:'#10b981' },
-  { flag:'🇧🇷', name:'Brazil',        code:'BR', reg:'LGPD',  color:'#22c55e' },
-  { flag:'🇸🇬', name:'Singapore',     code:'SG', reg:'PDPA',  color:'#ec4899' },
+  { code: 'US', name: 'United States', reg: 'CCPA/CPRA', flag: '\u{1F1FA}\u{1F1F8}' },
+  { code: 'DE', name: 'Germany',       reg: 'GDPR/BDSG', flag: '\u{1F1E9}\u{1F1EA}' },
+  { code: 'IN', name: 'India',         reg: 'DPDP 2023', flag: '\u{1F1EE}\u{1F1F3}' },
+  { code: 'SA', name: 'Saudi Arabia',  reg: 'PDPL',      flag: '\u{1F1F8}\u{1F1E6}' },
+  { code: 'BR', name: 'Brazil',        reg: 'LGPD',      flag: '\u{1F1E7}\u{1F1F7}' },
+  { code: 'SG', name: 'Singapore',     reg: 'PDPA',      flag: '\u{1F1F8}\u{1F1EC}' },
 ];
 
-/* ─── ChatMessage ─── */
-function ChatMessage({ message }) {
-  const isUser = message.role === 'user';
-  const agent  = AGENTS[message.agent] || AGENTS.supervisor;
-  return (
-    <div className={`flex gap-3 py-2.5 msg-enter ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser && (
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 btn-glow text-white">
-          <SparkleIcon />
-        </div>
-      )}
-      <div className={`max-w-[78%] ${isUser ? 'order-first' : ''}`}>
-        {!isUser && (
-          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
-              style={{ background:agent.color+'22', color:agent.color, border:`1px solid ${agent.color}44` }}>
-              {agent.emoji} {agent.label}
-            </span>
-            {message.model && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full"
-                style={{ background:'var(--bg-secondary)', color:'var(--text-secondary)', border:'1px solid var(--border-color)' }}>
-                {message.model}
-              </span>
-            )}
-            {message.totalTime && (
-              <span className="text-[11px]" style={{ color:'var(--text-secondary)' }}>⚡ {message.totalTime}ms</span>
-            )}
-            {message.retrievalSource && (
-              <span className="text-[11px] px-2 py-0.5 rounded-full"
-                style={{
-                  background: message.retrievalSource==='hybrid' ? '#f59e0b18' : '#10b98118',
-                  color:      message.retrievalSource==='hybrid' ? '#f59e0b'   : '#10b981',
-                  border:`1px solid ${message.retrievalSource==='hybrid' ? '#f59e0b44' : '#10b98144'}`,
-                }}>
-                {message.retrievalSource==='hybrid' ? '🔀 RAG + Web' : '📚 RAG'}
-              </span>
-            )}
-          </div>
-        )}
-        <div className={`rounded-2xl px-4 py-3 ${isUser ? 'rounded-br-sm text-white' : 'rounded-bl-sm'}`}
-          style={isUser
-            ? { background:'var(--user-bubble)', boxShadow:'0 4px 24px var(--accent-glow)' }
-            : { background:'var(--bg-card)', border:'1px solid var(--border-color)' }}>
-          {isUser
-            ? <p className="text-sm leading-relaxed">{message.content}</p>
-            : <div className="markdown-content text-sm"><ReactMarkdown>{message.content?.replace(/\n---\n\*.+\*$/, '')}</ReactMarkdown></div>
-          }
-        </div>
-      </div>
-      {isUser && (
-        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 btn-glow text-white">
-          <span className="text-[11px] font-bold">PM</span>
-        </div>
-      )}
-    </div>
-  );
-}
+// Top-level navigation tabs rendered in the app shell header
+const TABS = [
+  { id: 'dashboard', label: 'Dashboard',    Icon: LayoutDashboard },
+  { id: 'compare',   label: 'Compare',      Icon: GitCompare },
+  { id: 'arch',      label: 'Architecture', Icon: Box },
+  { id: 'chat',      label: 'Chat',         Icon: MessageSquare },
+  { id: 'metrics',   label: 'Metrics',      Icon: BarChart3 },
+];
 
-/* ─── Spinner ─── */
-function SpinLoader() {
-  return (
-    <div className="flex gap-3 py-2.5 msg-enter">
-      <div className="spin-ring"><div className="spin-ring-inner"><SparkleIcon /></div></div>
-      <div className="rounded-2xl rounded-bl-sm px-4 py-3 flex items-center"
-        style={{ background:'var(--bg-card)', border:'1px solid var(--border-color)' }}>
-        <div className="flex gap-2 items-center">
-          {['#6366f1','#8b5cf6','#ec4899'].map((c,i) => (
-            <span key={i} className="w-2 h-2 rounded-full animate-bounce"
-              style={{ background:c, animationDelay:`${i*160}ms` }} />
-          ))}
-          <span className="text-xs ml-1" style={{ color:'var(--text-secondary)' }}>Routing through agents…</span>
-        </div>
-      </div>
-    </div>
-  );
-}
+// Capability cards shown on the landing page features section
+const CAPS = [
+  { title: 'Tech Stack Explainer',  desc: 'Translate engineering jargon into language any PM can act on',            prompt: 'What is Kubernetes and why does it matter for product managers?', color: 'var(--sky)' },
+  { title: 'Architecture Mapper',   desc: 'Surface service dependencies, data flows, and ownership across teams',    prompt: 'What are the key dependencies in a microservices architecture?',  color: 'var(--lilac)' },
+  { title: 'Compliance Analysis',   desc: 'Assess data protection and launch readiness across 6 global markets',     prompt: 'Compare launch readiness for India vs Germany',                   color: 'var(--sand)' },
+  { title: 'Action Plan Generator', desc: 'Build stakeholder checklists and prioritized release-readiness plans',    prompt: 'Generate an action plan for launching in Brazil',                 color: 'var(--coral)' },
+];
 
-/* ─── Context Panel (sidebar tab) ─── */
-function ContextTab({ context, onSave, onClear }) {
-  const [editing, setEditing] = useState(false);
-  const [draft,   setDraft]   = useState(context || '');
-  return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs leading-relaxed" style={{ color:'var(--text-secondary)' }}>
-        Paste your architecture notes, tech stack doc, or README. The copilot will use this as context for all responses.
-      </p>
-      {!context && !editing ? (
-        <button onClick={() => setEditing(true)}
-          className="w-full text-xs py-3 rounded-xl border-2 border-dashed transition-all hover:border-indigo-500 hover:text-indigo-400"
-          style={{ borderColor:'var(--border-color)', color:'var(--text-secondary)' }}>
-          + Paste Architecture Context
-        </button>
-      ) : editing ? (
-        <>
-          <textarea value={draft} onChange={e => setDraft(e.target.value)}
-            placeholder="Paste architecture notes, service descriptions, cloud setup..."
-            className="w-full h-40 text-xs rounded-xl p-3 resize-none focus:outline-none"
-            style={{ background:'var(--bg-secondary)', border:'1.5px solid var(--accent)', color:'var(--text-primary)', boxShadow:'0 0 0 3px var(--accent-soft)' }}
-          />
-          <div className="flex gap-2">
-            <button onClick={() => { onSave(draft); setEditing(false); }}
-              className="flex-1 text-xs py-2 rounded-xl font-semibold btn-glow text-white">
-              Save Context
-            </button>
-            <button onClick={() => setEditing(false)}
-              className="text-xs px-3 rounded-xl" style={{ background:'var(--bg-secondary)', color:'var(--text-secondary)' }}>
-              Cancel
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="text-xs p-3 rounded-xl max-h-32 overflow-y-auto leading-relaxed"
-            style={{ background:'var(--bg-secondary)', color:'var(--text-secondary)', border:'1px solid var(--border-color)' }}>
-            {context.substring(0,300)}{context.length>300?'…':''}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => { setEditing(true); setDraft(context); }}
-              className="flex-1 text-xs py-1.5 rounded-lg" style={{ background:'var(--accent-soft)', color:'var(--accent)' }}>
-              Edit
-            </button>
-            <button onClick={onClear}
-              className="text-xs px-3 py-1.5 rounded-lg flex items-center gap-1" style={{ background:'#ef444418', color:'#ef4444' }}>
-              <TrashIcon /> Clear
-            </button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
+// ── Shared UI primitives ───────────────────────────────────────────────────────
 
-/* ─── Countries Tab ─── */
-function CountriesTab({ onSend }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <p className="text-xs" style={{ color:'var(--text-secondary)' }}>
-        Click any country to check its launch requirements instantly.
-      </p>
-      <div className="grid grid-cols-1 gap-2">
-        {COUNTRIES.map((c, i) => (
-          <button key={c.code}
-            onClick={() => onSend(`What are the launch requirements and compliance needs for ${c.name}?`)}
-            className={`card-fade-in card-hover flex items-center gap-3 px-3 py-2.5 rounded-xl text-left delay-${i}`}
-            style={{ background:'var(--bg-secondary)', border:`1px solid ${c.color}30` }}>
-            <span className="text-2xl leading-none flex-shrink-0">{c.flag}</span>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold truncate" style={{ color:c.color }}>{c.name}</div>
-              <div className="text-[11px]" style={{ color:'var(--text-secondary)' }}>{c.reg}</div>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background:c.color+'20', color:c.color }}>
-              →
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ─── Agents Tab ─── */
-function AgentsTab() {
-  const info = {
-    tech_stack_explainer: 'GPT-4o-mini · Fast summarisation of technical concepts',
-    architecture_mapper:  'GPT-4 · Complex multi-service dependency reasoning',
-    country_readiness:    'Gemini 2.0 Flash · Nuanced regulatory analysis with RAG',
-    action_plan:          'Gemini 2.0 Flash · Structured stakeholder-ready checklists',
-  };
-  return (
-    <div className="flex flex-col gap-2.5">
-      <p className="text-xs" style={{ color:'var(--text-secondary)' }}>
-        Queries are automatically routed to the best agent. Each agent uses a different LLM optimised for its task.
-      </p>
-      {Object.entries(AGENTS).filter(([k]) => k !== 'supervisor').map(([key, val], i) => (
-        <div key={key} className={`card-fade-in rounded-xl p-3 delay-${i}`}
-          style={{ background:'var(--bg-secondary)', border:`1px solid ${val.color}30` }}>
-          <div className="flex items-center gap-2.5 mb-1">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0"
-              style={{ background:val.color+'22', border:`1px solid ${val.color}44` }}>
-              {val.emoji}
-            </div>
-            <div className="flex-1">
-              <div className="text-xs font-semibold" style={{ color:val.color }}>{val.label}</div>
-              <div className="flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full agent-dot" style={{ background:val.color, animationDelay:`${i*400}ms`, display:'inline-block' }} />
-                <span className="text-[10px]" style={{ color:'var(--text-secondary)' }}>Online</span>
-              </div>
-            </div>
-          </div>
-          <p className="text-[11px] leading-relaxed" style={{ color:'var(--text-secondary)' }}>{info[key]}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ─── Empty State ─── */
-function EmptyState({ onSend, suggestions }) {
-  const emojis = ['⚙️','🌍','🔐','📊','🏗️','📋'];
-  return (
-    <div className="min-h-full flex flex-col items-center justify-center dot-grid px-4 py-12">
-      {/* Hero */}
-      <div className="float-anim mb-5">
-        <div className="w-24 h-24 rounded-3xl btn-glow pulse-ring-hero text-5xl flex items-center justify-center">🌐</div>
-      </div>
-      <h2 className="text-3xl font-bold mb-2 text-center gradient-text w-full max-w-lg" style={{ lineHeight: 1.35 }}>Technical PM Copilot</h2>
-      <p className="text-sm text-center max-w-md mb-8 leading-relaxed" style={{ color:'var(--text-secondary)' }}>
-        Your AI-powered assistant for tech stack explainers, architecture analysis, global compliance checks, and launch planning.
-      </p>
-
-      {/* Feature cards */}
-      <div className="grid grid-cols-2 gap-3 w-full max-w-2xl mb-8">
-        {FEATURES.map((f, i) => (
-          <button key={i}
-            onClick={() => onSend(f.prompt)}
-            className={`feature-card card-fade-in delay-${i} text-left`}
-            style={{ background:'var(--bg-card)', border:`1px solid ${f.color}30`, '--feature-color': f.color }}
-            onMouseEnter={e => { e.currentTarget.style.boxShadow = `0 12px 40px ${f.color}30, 0 0 0 1px ${f.color}44`; }}
-            onMouseLeave={e => { e.currentTarget.style.boxShadow = ''; }}>
-            {/* Color top bar */}
-            <div style={{ position:'absolute', top:0, left:0, right:0, height:'3px', background:`linear-gradient(90deg, ${f.color}, ${f.color}88)`, borderRadius:'20px 20px 0 0' }} />
-            <div className="text-3xl mb-3">{f.icon}</div>
-            <div className="text-sm font-bold mb-1.5" style={{ color:'var(--text-primary)' }}>{f.title}</div>
-            <div className="text-xs leading-relaxed mb-3" style={{ color:'var(--text-secondary)' }}>{f.desc}</div>
-            <div className="text-xs font-semibold" style={{ color:f.color }}>Try it →</div>
-          </button>
-        ))}
-      </div>
-
-      {/* Suggestion chips */}
-      <div className="w-full max-w-2xl">
-        <p className="text-[11px] text-center mb-3 font-medium uppercase tracking-wider" style={{ color:'var(--text-secondary)' }}>
-          Or start with a question
-        </p>
-        <div className="flex flex-wrap gap-2 justify-center">
-          {suggestions.slice(0, 6).map((q, i) => (
-            <button key={i}
-              onClick={() => onSend(q)}
-              className={`card-fade-in card-hover text-xs px-3 py-2 rounded-xl delay-${i}`}
-              style={{ background:'var(--bg-card)', border:'1px solid var(--border-color)', color:'var(--text-secondary)' }}>
-              {emojis[i]} {q}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Main App ─── */
-export default function App() {
-  const [messages,     setMessages]     = useState([]);
-  const [input,        setInput]        = useState('');
-  const [isLoading,    setIsLoading]    = useState(false);
-  const [context,      setContext]      = useState('');
-  const [suggestions,  setSuggestions]  = useState([]);
-  const [darkMode,     setDarkMode]     = useState(true);
-  const [sidebarTab,   setSidebarTab]   = useState('context');
-  const [collapsed,    setCollapsed]    = useState(false);
-  const chatEndRef = useRef(null);
-  const inputRef   = useRef(null);
+// Renders a mermaid diagram from LLM-generated chart text.
+// Sanitizes common LLM syntax errors before calling mermaid.render(),
+// and falls back to a plain text view if the diagram still fails to parse.
+function Mmd({ chart }) {
+  const ref = useRef(null);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+    if (!ref.current || !chart) return;
 
-  useEffect(() => { loadSuggestions(); }, [context]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior:'smooth' }); }, [messages]);
+    const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
 
-  const loadSuggestions = async () => {
-    try { setSuggestions(await chatApi.getSuggestedQuestions()); }
-    catch { setSuggestions([
-      "What is Kubernetes and why does it matter for PMs?",
-      "Can we launch this stack in Germany?",
-      "Compare India vs Saudi Arabia for launch readiness",
-      "Generate an action plan for global launch",
-      "What does GDPR require for data storage?",
-      "Explain microservices vs monolith for a PM",
-    ]); }
+    // --- Sanitize the chart ---
+    let clean = chart.trim();
+
+    // 1. Strip code fence wrappers the LLM sometimes leaves in
+    clean = clean.replace(/^```mermaid\s*/i, '').replace(/```\s*$/, '').trim();
+
+    // 2. Remove trailing semicolons on the graph declaration line (e.g. "graph TD;")
+    clean = clean.replace(/^(graph\s+\w+)\s*;/gm, '$1');
+
+    // 3. Remove pipe edge-labels entirely (-->|text| → -->) — labels with spaces or
+    //    special chars are a common LLM-generated syntax error
+    clean = clean.replace(/(--[->])\s*\|[^|]*\|/g, '$1');
+
+    // 4. Remove parenthesised content inside square-bracket node labels
+    //    e.g. [Auth Service (Firebase)] → [Auth Service]
+    clean = clean.replace(/\[([^\]]*?)\s*\([^)]*\)\]/g, '[$1]');
+    // Tidy any leftover interior whitespace
+    clean = clean.replace(/\[\s+/g, '[').replace(/\s+\]/g, ']');
+
+    // 5. Remove "style" lines — they often carry hex colours the parser rejects
+    clean = clean.replace(/^\s*style\s+.*/gm, '');
+
+    // 6. Drop blank lines produced by the above passes
+    clean = clean.split('\n').filter(l => l.trim()).join('\n');
+
+    // 7. Ensure valid diagram-type prefix
+    if (!clean.match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)/)) {
+      clean = 'graph TD\n' + clean;
+    }
+
+    const renderDiagram = async () => {
+      try {
+        const { svg } = await mermaid.render(id, clean);
+        if (ref.current) ref.current.innerHTML = svg;
+      } catch (e) {
+        if (ref.current) {
+          // Remove any partial error SVG mermaid may have injected before throwing
+          ref.current.querySelectorAll('.error-icon, #d-mmd').forEach(el => el.remove());
+          ref.current.innerHTML =
+            '<div style="padding:12px;border-radius:6px;background:var(--bg-2);border:1px solid var(--border);overflow-x:auto">' +
+            '<div style="font-size:10px;color:var(--tx-3);margin-bottom:8px;font-weight:500">Architecture Diagram (text view)</div>' +
+            '<pre style="font-size:11px;color:var(--tx-2);white-space:pre-wrap;margin:0">' + chart.replace(/</g, '&lt;') + '</pre></div>';
+        }
+      }
+    };
+
+    renderDiagram();
+  }, [chart]);
+
+  return <div ref={ref} className="mermaid-box" />;
+}
+
+// Renders markdown with GitHub-Flavored Markdown tables and inline mermaid diagrams.
+// Intercepts ```mermaid code blocks and hands them to <Mmd>.
+function Md({ content }) {
+  return (
+    <div className="md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+        code({ children, className }) {
+          if (className?.includes('mermaid')) return <Mmd chart={String(children)} />;
+          return <code className={className}>{children}</code>;
+        },
+      }}>
+        {content?.replace(/\n---\n\*.+\*$/, '') || ''}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+// Coloured pill showing HIGH / MEDIUM / LOW launch readiness
+function StatusBadge({ level }) {
+  const map = {
+    HIGH:   { color: 'var(--green)', bg: 'var(--green-dim)', label: 'Ready' },
+    MEDIUM: { color: 'var(--sand)',  bg: 'var(--sand-dim)',  label: 'Gaps' },
+    LOW:    { color: 'var(--coral)', bg: 'var(--coral-dim)', label: 'Blocked' },
+  };
+  const s = map[level] || map.MEDIUM;
+  return (
+    <span className="status-badge" style={{ background: s.bg, color: s.color, borderColor: `color-mix(in srgb, ${s.color} 25%, transparent)` }}>
+      {level === 'HIGH' && <CheckCircle size={11} />}
+      {level === 'MEDIUM' && <AlertTriangle size={11} />}
+      {level === 'LOW' && <XCircle size={11} />}
+      {s.label}
+    </span>
+  );
+}
+
+function LoadingCard() {
+  return (
+    <div className="loading-card">
+      <Loader2 size={16} className="spin" style={{ color: 'var(--sage)' }} />
+      <span>Analyzing...</span>
+    </div>
+  );
+}
+
+// Compact row of metadata pills (agent, model, latency, retrieval source, confidence)
+// shown above every assistant response bubble.
+function MetricChips({ data }) {
+  const ag = AGENTS[data.agent] || AGENTS.supervisor;
+  return (
+    <div className="mstrip">
+      {data.agent && (
+        <span className="apill" style={{ background: `color-mix(in srgb, ${ag.color} 14%, transparent)`, color: ag.color, border: `1px solid color-mix(in srgb, ${ag.color} 22%, transparent)` }}>
+          {ag.label}
+        </span>
+      )}
+      {data.model && <span className="mpill"><Cpu size={9} />{data.model}</span>}
+      {data.time && <span className="mpill"><Clock size={9} />{data.time}ms</span>}
+      {data.src && <span className="mpill">{data.src === 'hybrid' ? <><Search size={9} />RAG+Web</> : <><Database size={9} />RAG</>}</span>}
+      {data.conf > 0 && <span className="mpill">{(data.conf * 100).toFixed(0)}%</span>}
+    </div>
+  );
+}
+
+// ── View components ────────────────────────────────────────────────────────────
+
+// Runs a per-country compliance analysis for all 6 markets and shows the results
+// in a card grid.  State is lifted to App so it survives tab switches.
+function DashboardView({ onNavigate, results, setResults, loading, setLoading }) {
+  const analyzeCountry = async (country) => {
+    setLoading(p => ({ ...p, [country.code]: true }));
+    try {
+      const ctxData = await contextApi.getContext();
+      const r = await chatApi.sendMessage(
+        `Assess the launch readiness for ${country.name}. Give a one-line summary, the readiness level (HIGH, MEDIUM, or LOW), and the top 3 blockers. Keep it very concise.`,
+        ctxData.context || ''
+      );
+      setResults(p => ({
+        ...p,
+        [country.code]: {
+          response: r.response,
+          level: r.response.includes('HIGH') ? 'HIGH' : r.response.includes('LOW') ? 'LOW' : 'MEDIUM',
+          agent: r.agent_used, model: r.model_used,
+          time: r.total_time_ms?.toFixed(0),
+          src: r.retrieval_source, conf: r.rag_confidence || 0,
+        }
+      }));
+    } catch (e) {
+      setResults(p => ({ ...p, [country.code]: { response: `Error: ${e.message}`, level: 'LOW' } }));
+    }
+    setLoading(p => ({ ...p, [country.code]: false }));
   };
 
-  const sendMessage = async (text) => {
-    if (!text.trim() || isLoading) return;
-    setMessages(prev => [...prev, { role:'user', content:text }]);
-    setInput('');
-    setIsLoading(true);
+  const analyzeAll = () => COUNTRIES.forEach(c => analyzeCountry(c));
+
+  return (
+    <div className="view-container">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button className="btn-primary" onClick={analyzeAll}>
+          <Zap size={13} /> Analyze All Markets
+        </button>
+      </div>
+
+      <div className="country-grid">
+        {COUNTRIES.map(c => {
+          const r = results[c.code];
+          const isLoading = loading[c.code];
+          return (
+            <div key={c.code} className="country-card">
+              <div className="country-card-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 20 }}>{c.flag}</span>
+                  <div>
+                    <div className="country-card-name">{c.name}</div>
+                    <div className="country-card-reg">{c.reg}</div>
+                  </div>
+                </div>
+                {r && <StatusBadge level={r.level} />}
+              </div>
+              {isLoading ? (
+                <LoadingCard />
+              ) : r ? (
+                <div>
+                  <MetricChips data={r} />
+                  <div className="country-card-body"><Md content={r.response} /></div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}
+                      onClick={() => onNavigate('chat', `What are the detailed compliance requirements and launch blockers for ${c.name}? Go deeper on each blocker and suggest specific remediation steps.`)}>
+                      <MessageSquare size={12} /> Discuss
+                    </button>
+                    <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}
+                      onClick={() => onNavigate('chat', `Generate a detailed action plan for launching in ${c.name}. Include specific owners, priorities, and timelines.`)}>
+                      <FileText size={12} /> Action Plan
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn-ghost" onClick={() => analyzeCountry(c)}>Analyze {c.name}</button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Side-by-side regulatory comparison between any two of the 6 supported markets.
+// countryA/countryB are kept local (fine to reset on tab switch); result/meta are lifted.
+function CompareView({ result, setResult, meta, setMeta }) {
+  const [countryA, setCountryA] = useState('DE');
+  const [countryB, setCountryB] = useState('IN');
+  const [loading, setLoading] = useState(false);
+
+  const compare = async () => {
+    const a = COUNTRIES.find(c => c.code === countryA);
+    const b = COUNTRIES.find(c => c.code === countryB);
+    if (!a || !b || a.code === b.code) return;
+    setLoading(true); setResult(null);
     try {
-      const res = await chatApi.sendMessage(text, context);
-      setMessages(prev => [...prev, {
-        role:'assistant', content:res.response,
-        agent:res.agent_used, model:res.model_used,
-        totalTime:res.total_time_ms?.toFixed(0),
-        retrievalSource:res.retrieval_source,
-      }]);
-    } catch (err) {
-      setMessages(prev => [...prev, {
-        role:'assistant',
-        content:`**Error:** ${err.response?.data?.detail || err.message || 'Failed to connect. Is the backend running?'}`,
-        agent:'supervisor',
-      }]);
-    } finally {
-      setIsLoading(false);
-      inputRef.current?.focus();
+      const ctx = await contextApi.getContext();
+      const r = await chatApi.sendMessage(
+        `Compare launch readiness between ${a.name} and ${b.name}. Create a detailed side-by-side comparison table covering: regulatory requirements, data residency, cloud infrastructure, breach notification, enforcement penalties, and overall readiness level.`,
+        ctx.context || ''
+      );
+      setResult(r.response);
+      setMeta({ agent: r.agent_used, model: r.model_used, time: r.total_time_ms?.toFixed(0), src: r.retrieval_source, conf: r.rag_confidence || 0 });
+    } catch (e) { setResult(`**Error:** ${e.message}`); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="view-container">
+      <div className="compare-controls">
+        <div className="select-wrap">
+          <label className="select-label">Market A</label>
+          <select className="select-input" value={countryA} onChange={e => setCountryA(e.target.value)}>
+            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.name} ({c.reg})</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 4 }}>
+          <GitCompare size={18} style={{ color: 'var(--tx-3)' }} />
+        </div>
+        <div className="select-wrap">
+          <label className="select-label">Market B</label>
+          <select className="select-input" value={countryB} onChange={e => setCountryB(e.target.value)}>
+            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.flag} {c.name} ({c.reg})</option>)}
+          </select>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+          <button className="btn-primary" onClick={compare} disabled={loading || countryA === countryB}>
+            {loading ? <Loader2 size={13} className="spin" /> : <GitCompare size={13} />} Compare
+          </button>
+        </div>
+      </div>
+      {loading && <LoadingCard />}
+      {result && (
+        <div className="result-card">
+          {meta && <MetricChips data={meta} />}
+          <Md content={result} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Architecture context editor + analyser.
+// Users paste (or upload) architecture docs; the agent returns a component map,
+// dependency analysis, and an optional Mermaid diagram.
+// All state is lifted so context/results persist across tab switches.
+function ArchView({ ctx, setCtx, saved, setSaved, result, setResult, diagramResult, setDiagramResult, meta, setMeta, uploadedImages, setUploadedImages }) {
+  const [loading, setLoading] = useState(false);
+  const [loadingDiagram, setLoadingDiagram] = useState(false);
+
+  useEffect(() => {
+    if (!ctx) {
+      contextApi.getContext().then(r => { if (r.context) { setCtx(r.context); setSaved(true); } }).catch(() => {});
+    }
+  }, []);
+
+  const save = async () => { await contextApi.setContext(ctx); setSaved(true); };
+
+  const handleUpload = async (file) => {
+    try {
+      const r = await uploadApi.upload(file);
+      if (r.type === 'pdf') {
+        setCtx(prev => prev ? `${prev}\n\n${r.text}` : r.text);
+        setSaved(false);
+      } else if (r.type === 'image') {
+        setUploadedImages(prev => [...prev, { src: `data:${r.mime_type};base64,${r.base64}`, name: r.filename }]);
+      }
+    } catch (e) { console.error('Upload failed:', e); }
+  };
+
+  const analyze = async () => {
+    setLoading(true);
+    try {
+      const r = await chatApi.sendMessage('Analyze this architecture. Identify all components, dependencies, team ownership, data flows, and flag any risks or single points of failure.', ctx);
+      setResult(r.response);
+      setMeta({ agent: r.agent_used, model: r.model_used, time: r.total_time_ms?.toFixed(0), src: r.retrieval_source, conf: r.rag_confidence || 0 });
+    } catch (e) { setResult(`**Error:** ${e.message}`); }
+    setLoading(false);
+  };
+
+  const generateDiagram = async () => {
+    setLoadingDiagram(true);
+    try {
+      const r = await chatApi.sendMessage('Generate a Mermaid architecture diagram based on the provided context. Show the key components and their connections. Output ONLY the mermaid code block, nothing else.', ctx);
+      setDiagramResult(r.response);
+    } catch (e) { setDiagramResult(`**Error:** ${e.message}`); }
+    setLoadingDiagram(false);
+  };
+
+  return (
+    <div className="view-container">
+      <div className="arch-input-section">
+        <textarea value={ctx} onChange={e => { setCtx(e.target.value); setSaved(false); }}
+          placeholder="Paste your architecture notes, tech stack documentation, service descriptions, README, or cloud setup details here..."
+          className="arch-textarea" />
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+          <button className="btn-primary" onClick={save} disabled={!ctx.trim()}>
+            <FileText size={13} /> {saved ? 'Saved' : 'Save Context'}
+          </button>
+          <button className="btn-secondary" onClick={analyze} disabled={!ctx.trim() || loading}>
+            {loading ? <Loader2 size={13} className="spin" /> : <Zap size={13} />} Analyze
+          </button>
+          <button className="btn-secondary" onClick={generateDiagram} disabled={!ctx.trim() || loadingDiagram}>
+            {loadingDiagram ? <Loader2 size={13} className="spin" /> : <Box size={13} />} Diagram
+          </button>
+          <label className="btn-secondary" style={{ cursor: 'pointer' }}>
+            <FileText size={13} /> Upload File
+            <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) { handleUpload(f); e.target.value = ''; } }} />
+          </label>
+        </div>
+        {uploadedImages.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+            {uploadedImages.map((img, i) => (
+              <div key={i} style={{ position: 'relative' }}>
+                <img src={img.src} alt={img.name}
+                  style={{ height: 72, width: 'auto', borderRadius: 6, border: '1px solid var(--border)', objectFit: 'cover' }} />
+                <button onClick={() => setUploadedImages(p => p.filter((_, j) => j !== i))}
+                  style={{ position: 'absolute', top: 2, right: 2, width: 16, height: 16, borderRadius: 3,
+                    background: 'var(--bg-2)', border: '1px solid var(--border)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tx-2)', fontSize: 11, lineHeight: 1 }}>
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {(loading || loadingDiagram) && <LoadingCard />}
+      <div style={{ display: 'grid', gridTemplateColumns: diagramResult && result ? '1fr 1fr' : '1fr', gap: 12 }}>
+        {result && (
+          <div className="result-card">
+            <div className="result-card-title">Component Analysis</div>
+            {meta && <MetricChips data={meta} />}
+            <Md content={result} />
+          </div>
+        )}
+        {diagramResult && (
+          <div className="result-card">
+            <div className="result-card-title">Architecture Diagram</div>
+            <Md content={diagramResult} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Hidden file input + icon button for uploading PDFs and images into the chat.
+// PDFs are extracted server-side (pypdf) and auto-sent as a text message.
+// Images are base64-encoded and displayed inline in the user bubble.
+function FileUploadBtn({ onFile }) {
+  const ref = useRef(null);
+  return (
+    <>
+      <button className="sbtn off" style={{ cursor: 'pointer', flexShrink: 0 }}
+        onClick={() => ref.current?.click()} title="Upload PDF or image">
+        <FileText size={13} />
+      </button>
+      <input ref={ref} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) { onFile(f); e.target.value = ''; } }} />
+    </>
+  );
+}
+
+// Free-form chat view with full message history, follow-up chips, and file upload.
+// preloadQuery lets other views (e.g. Dashboard cards) inject a query and navigate here.
+// msgs/busy are lifted to App so history survives tab switches.
+function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy }) {
+  const [inp, setInp] = useState('');
+  const endRef = useRef(null);
+  const inpRef = useRef(null);
+  const preloadHandled = useRef(false);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [msgs]);
+
+  useEffect(() => {
+    if (preloadQuery && !preloadHandled.current) {
+      preloadHandled.current = true;
+      send(preloadQuery);
+      onConsumePreload();
+    }
+    return () => { preloadHandled.current = false; };
+  }, [preloadQuery]);
+
+  const handleFile = async (file) => {
+    try {
+      const r = await uploadApi.upload(file);
+      if (r.type === 'pdf') {
+        send(`Analyze this document:\n\n${r.text.slice(0, 3000)}`);
+      } else if (r.type === 'image') {
+        const imgSrc = `data:${r.mime_type};base64,${r.base64}`;
+        setMsgs(p => [...p, { role: 'user', content: `Analyze this image: ${r.filename}`, imageData: imgSrc }]);
+        setBusy(true);
+        try {
+          const res = await chatApi.sendMessage(`The user uploaded an image called "${r.filename}". Describe what kind of architecture or system diagram this might represent and provide relevant PM insights.`);
+          setMsgs(p => [...p, {
+            role: 'assistant', content: res.response,
+            agent: res.agent_used, model: res.model_used,
+            totalTime: res.total_time_ms?.toFixed(0),
+            src: res.retrieval_source, conf: res.rag_confidence || 0,
+            followUps: res.follow_up_questions || [],
+          }]);
+        } catch (e) {
+          setMsgs(p => [...p, { role: 'assistant', content: `**Error:** ${e.message}`, agent: 'supervisor' }]);
+        }
+        setBusy(false);
+      }
+    } catch (e) {
+      setMsgs(p => [...p, { role: 'assistant', content: `**Upload error:** ${e.message}`, agent: 'supervisor' }]);
     }
   };
 
-  const handleKeyDown    = (e) => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input); } };
-  const handleSaveCtx    = async (ctx) => { setContext(ctx); try { await contextApi.setContext(ctx); } catch {} };
-  const handleClearCtx   = async ()    => { setContext('');  try { await contextApi.clearContext();  } catch {} };
-
-  const lastAgent = messages.length > 0
-    ? [...messages].reverse().find(m => m.role==='assistant')?.agent
-    : null;
-  const lastAgentInfo = lastAgent ? (AGENTS[lastAgent] || AGENTS.supervisor) : null;
-
-  // TABS is defined at module level — add new entries there to extend the sidebar
+  const send = async (txt) => {
+    if (!txt.trim() || busy) return;
+    setMsgs(p => [...p, { role: 'user', content: txt }]);
+    setInp('');
+    setBusy(true);
+    try {
+      const r = await chatApi.sendMessage(txt);
+      setMsgs(p => [...p, {
+        role: 'assistant', content: r.response,
+        agent: r.agent_used, model: r.model_used,
+        totalTime: r.total_time_ms?.toFixed(0),
+        src: r.retrieval_source, conf: r.rag_confidence || 0,
+        followUps: r.follow_up_questions || [],
+      }]);
+    } catch (e) {
+      setMsgs(p => [...p, { role: 'assistant', content: `**Error:** ${e.message}`, agent: 'supervisor' }]);
+    }
+    setBusy(false);
+    inpRef.current?.focus();
+  };
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden relative" style={{ background:'var(--bg-primary)', color:'var(--text-primary)' }}>
-      {/* Aurora */}
-      <div className="aurora-blob aurora-1"/><div className="aurora-blob aurora-2"/>
-      <div className="aurora-blob aurora-3"/><div className="aurora-blob aurora-4"/>
-
-      {/* ═══════════ UNIFIED TOP HEADER (full width) ═══════════ */}
-      <header className="flex-shrink-0 relative z-20 border-b" style={{ borderColor:'var(--border-color)' }}>
-        <div className="rainbow-stripe" />
-        <div className="flex items-center gap-3 px-4 py-2.5"
-          style={{ background:'var(--frosted-bg)', backdropFilter:'blur(16px)' }}>
-
-          {/* Collapse/expand toggle */}
-          <button onClick={() => setCollapsed(!collapsed)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 hover:scale-110 transition-transform"
-            style={{ background:'var(--bg-card)', border:'1px solid var(--border-color)', color:'var(--text-secondary)' }}>
-            {collapsed ? <ChevronRight /> : <ChevronLeft />}
-          </button>
-
-          {/* Logo + title */}
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center btn-glow text-white text-base flex-shrink-0">🌐</div>
-          <div className="flex-shrink-0">
-            <span className="text-sm font-bold" style={{
-              background:'var(--gradient-accent)',
-              WebkitBackgroundClip:'text',
-              WebkitTextFillColor:'transparent',
-              backgroundClip:'text',
-              backgroundSize:'200% 100%',
-            }}>PM Copilot</span>
-          </div>
-
-          {/* Badges */}
-          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold flex-shrink-0"
-            style={{ background:'var(--accent-soft)', color:'var(--accent)', border:'1px solid var(--accent)44' }}>
-            ✦ Multi-Agent
-          </span>
-          {lastAgentInfo && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"
-              style={{ background:lastAgentInfo.color+'18', color:lastAgentInfo.color, border:`1px solid ${lastAgentInfo.color}44` }}>
-              {lastAgentInfo.emoji} {lastAgentInfo.label}
-            </span>
-          )}
-
-          {/* Spacer */}
-          <div className="flex-1" />
-
-          {/* Country quick-chips */}
-          {messages.length > 0 && (
-            <div className="hidden md:flex gap-2 flex-shrink-0">
-              {COUNTRIES.slice(0,4).map(c => (
-                <button key={c.code}
-                  onClick={() => sendMessage(`What are the launch requirements for ${c.name}?`)}
-                  title={c.name}
-                  className="text-lg hover:scale-125 transition-transform leading-none">
-                  {c.flag}
-                </button>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+        {msgs.length === 0 ? (
+          <div className="chat-empty">
+            <Zap size={20} style={{ color: 'var(--sage)', marginBottom: 12 }} />
+            <h3>Ask anything</h3>
+            <p>Tech stacks, architecture, compliance, or launch planning</p>
+            <div className="chat-starters">
+              {['What is Kubernetes and why does it matter?', 'What does GDPR require for data storage?', 'Generate a launch action plan for India', 'Explain microservices vs monolith'].map((q, i) => (
+                <button key={i} className="starter-chip" onClick={() => send(q)}>{q}</button>
               ))}
             </div>
-          )}
-
-          {/* Message count */}
-          {messages.length > 0 && (
-            <span className="text-[11px] px-2 py-0.5 rounded-full flex-shrink-0"
-              style={{ background:'var(--bg-card)', color:'var(--text-secondary)', border:'1px solid var(--border-color)' }}>
-              {messages.length} msg{messages.length!==1?'s':''}
-            </span>
-          )}
-
-        </div>
-      </header>
-
-      {/* ═══════════ BODY (sidebar + main side by side) ═══════════ */}
-      <div className="flex flex-1 overflow-hidden">
-
-        {/* ── Sidebar: icon rail (always) + content panel (when expanded) ── */}
-        <aside className="sidebar flex-shrink-0 flex border-r relative z-10"
-          style={{ width: collapsed ? 52 : 300, background:'var(--bg-sidebar)', borderColor:'var(--border-color)' }}>
-
-          {/* ── Icon Rail — never collapses, scales with any number of tabs ── */}
-          <div className="flex flex-col items-center gap-1 py-2 flex-shrink-0"
-            style={{ width:52, borderRight: collapsed ? 'none' : '1px solid var(--border-color)' }}>
-
-            {TABS.map(t => (
-              <button key={t.id}
-                onClick={() => { setSidebarTab(t.id); if (collapsed) setCollapsed(false); }}
-                className="nav-icon-btn tooltip-wrap"
-                style={{
-                  background: sidebarTab===t.id ? 'var(--accent-soft)' : 'transparent',
-                  color:      sidebarTab===t.id ? 'var(--accent)'      : 'var(--text-secondary)',
-                  borderColor: sidebarTab===t.id ? 'var(--accent)33'   : 'transparent',
-                }}>
-                {t.icon}
-                <span className="tooltip">{t.label}</span>
-              </button>
+          </div>
+        ) : (
+          <div style={{ maxWidth: 780, margin: '0 auto' }}>
+            {msgs.map((m, i) => (
+              <div key={i} className={`row ${m.role === 'user' ? 'u' : ''}`}>
+                <div className={`bub ${m.role === 'user' ? 'u' : 'a'}`}>
+                  {m.role !== 'user' && (
+                    <MetricChips data={{ agent: m.agent, model: m.model, time: m.totalTime, src: m.src, conf: m.conf }} />
+                  )}
+                  {m.role === 'user' ? (
+                    <div>
+                      {m.imageData && (
+                        <img src={m.imageData} alt="uploaded"
+                          style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 6, display: 'block', marginBottom: m.content ? 6 : 0 }} />
+                      )}
+                      {m.content && <p style={{ margin: 0, lineHeight: 1.6 }}>{m.content}</p>}
+                    </div>
+                  ) : (
+                    <>
+                      <Md content={m.content} />
+                      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                        <button className="fuchip" style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                          onClick={() => {
+                            const md = `# PM Copilot Report\n\n## Query\n${msgs[i-1]?.content || ''}\n\n## Analysis\n${m.content}\n\n---\n*Agent: ${m.agent} | Model: ${m.model} | Time: ${m.totalTime}ms*`;
+                            const blob = new Blob([md], { type: 'text/markdown' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a'); a.href = url; a.download = `pm-report-${Date.now()}.md`;
+                            a.click(); URL.revokeObjectURL(url);
+                          }}>
+                          <Download size={10} /> Export .md
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  {m.followUps?.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 10 }}>
+                      {m.followUps.map((q, j) => <button key={j} className="fuchip" onClick={() => send(q)}>{q}</button>)}
+                    </div>
+                  )}
+                </div>
+              </div>
             ))}
-
-            {/* Push utils to bottom */}
-            <div className="flex-1" />
-
-            {/* Clear chat */}
-            {messages.length > 0 && (
-              <button onClick={() => setMessages([])}
-                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all tooltip-wrap"
-                style={{ color:'var(--text-secondary)', border:'1px solid transparent' }}
-                onMouseEnter={e => { e.currentTarget.style.background='#ef444415'; e.currentTarget.style.color='#ef4444'; e.currentTarget.style.border='1px solid #ef444430'; }}
-                onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.color='var(--text-secondary)'; e.currentTarget.style.border='1px solid transparent'; }}>
-                <TrashIcon />
-                <span className="tooltip">Clear chat</span>
-              </button>
+            {busy && (
+              <div className="row">
+                <div className="bub a" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px' }}>
+                  <div className="ldot" /><div className="ldot" /><div className="ldot" />
+                  <span className="meta-text">routing...</span>
+                </div>
+              </div>
             )}
-
-            <div style={{ height:1, width:28, background:'var(--border-color)', margin:'4px 0' }} />
-
-            {/* Theme toggle */}
-            <button onClick={() => setDarkMode(!darkMode)}
-              className="w-10 h-10 mb-2 rounded-xl flex items-center justify-center transition-all tooltip-wrap"
-              style={{ background:'var(--bg-card)', border:'1px solid var(--border-color)', color:'var(--text-secondary)' }}>
-              {darkMode ? <SunIcon /> : <MoonIcon />}
-              <span className="tooltip">{darkMode ? 'Light mode' : 'Dark mode'}</span>
+            <div ref={endRef} />
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '10px 20px', borderTop: '1px solid var(--border)', background: 'var(--bg-0)' }}>
+        <div style={{ maxWidth: 780, margin: '0 auto' }}>
+          <div className="ibar">
+            <textarea ref={inpRef} value={inp} onChange={e => setInp(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(inp); } }}
+              placeholder="Ask about tech stacks, architecture, or launch readiness..."
+              rows={1} onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }} />
+            <FileUploadBtn onFile={handleFile} />
+            <button onClick={() => send(inp)} className={`sbtn ${inp.trim() && !busy ? 'on' : 'off'}`} disabled={!inp.trim() || busy}>
+              <Send size={13} />
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          {/* ── Content Panel — hidden when collapsed ── */}
-          {!collapsed && (
-            <div className="flex flex-col flex-1 overflow-hidden panel-enter">
-              {/* Panel header */}
-              <div className="flex items-center gap-2 px-3 pt-3 pb-2 flex-shrink-0">
-                <span className="text-base leading-none">{TABS.find(t => t.id===sidebarTab)?.icon}</span>
-                <span className="text-xs font-semibold" style={{ color:'var(--text-primary)' }}>
-                  {TABS.find(t => t.id===sidebarTab)?.label}
-                </span>
+// Static read-only view documenting the LLM routing decisions, RAG pipeline
+// configuration, supported countries, and GenAI concepts used in the project.
+function MetricsView() {
+  return (
+    <div className="view-container">
+      <div className="view-header">
+        <div>
+          <h2 className="view-title">System Metrics</h2>
+          <p className="view-desc">Performance monitoring and model usage statistics</p>
+        </div>
+      </div>
+      <div className="metrics-grid">
+        <div className="metric-card">
+          <div className="metric-card-label">LLM Routing</div>
+          <div className="metric-card-body">
+            {[
+              { agent: 'Supervisor', model: 'GPT-4o-mini', reason: 'Fast query classification' },
+              { agent: 'Tech Stack', model: 'GPT-4o-mini', reason: 'Cost-effective summarization' },
+              { agent: 'Architecture', model: 'GPT-4', reason: 'Complex dependency reasoning' },
+              { agent: 'Compliance', model: 'GPT-4', reason: 'Regulatory analysis' },
+              { agent: 'Action Plan', model: 'GPT-4', reason: 'Structured output generation' },
+            ].map((r, i) => (
+              <div key={i} className="metric-row">
+                <span className="metric-row-agent">{r.agent}</span>
+                <span className="metric-row-model">{r.model}</span>
+                <span className="metric-row-reason">{r.reason}</span>
               </div>
-              <div style={{ height:1, background:'var(--border-color)', marginLeft:0, marginRight:12 }} />
-              {/* Tab content — add new cases here when TABS grows */}
-              <div className="flex-1 overflow-y-auto p-3">
-                {sidebarTab==='context'   && <ContextTab context={context} onSave={handleSaveCtx} onClear={handleClearCtx} />}
-                {sidebarTab==='countries' && <CountriesTab onSend={sendMessage} />}
-                {sidebarTab==='agents'    && <AgentsTab />}
-              </div>
-            </div>
-          )}
-        </aside>
-
-        {/* ── Main ── */}
-        <main className="flex-1 flex flex-col overflow-hidden relative z-10">
-
-          {/* Messages / Empty state */}
-          <div className="flex-1 overflow-y-auto">
-            {messages.length === 0
-              ? <EmptyState onSend={sendMessage} suggestions={suggestions} />
-              : (
-                <div className="max-w-3xl mx-auto px-5 py-4">
-                  {messages.map((msg, i) => <ChatMessage key={i} message={msg} />)}
-                  {isLoading && <SpinLoader />}
-                  <div ref={chatEndRef} />
-                </div>
-              )
-            }
-          </div>
-
-          {/* Input bar */}
-          <div className="px-5 py-3 border-t flex-shrink-0"
-            style={{ background:'var(--frosted-bg)', backdropFilter:'blur(14px)', borderColor:'var(--border-color)' }}>
-          <div className="max-w-3xl mx-auto">
-            <div className="flex items-end gap-2 rounded-2xl p-2"
-              style={{ background:'var(--bg-card)', border:'1.5px solid var(--border-color)', transition:'border-color 0.2s, box-shadow 0.2s' }}
-              onFocusCapture={e => { e.currentTarget.style.borderColor='var(--accent)'; e.currentTarget.style.boxShadow='0 0 0 3px var(--accent-soft)'; }}
-              onBlurCapture={e  => { e.currentTarget.style.borderColor='var(--border-color)'; e.currentTarget.style.boxShadow='none'; }}>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask about tech stacks, architecture, compliance, or launch readiness…"
-                rows={1}
-                className="flex-1 text-sm py-2 px-3 resize-none focus:outline-none bg-transparent"
-                style={{ color:'var(--text-primary)', maxHeight:'120px' }}
-                onInput={e => { e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,120)+'px'; }}
-              />
-              <button onClick={() => sendMessage(input)} disabled={!input.trim()||isLoading}
-                className="p-2.5 rounded-xl btn-glow text-white flex-shrink-0">
-                <SendIcon />
-              </button>
-            </div>
-            <div className="flex items-center justify-between mt-1.5 px-1">
-              <span className="text-[10px]" style={{ color:'var(--text-secondary)' }}>
-                Enter to send · Shift+Enter for new line
-              </span>
-              <span className="text-[10px]" style={{ color:'var(--text-secondary)' }}>
-                Always verify compliance with legal teams
-              </span>
-            </div>
+            ))}
           </div>
         </div>
-      </main>
-
+        <div className="metric-card">
+          <div className="metric-card-label">RAG Pipeline</div>
+          <div className="metric-card-body">
+            {[
+              ['Vector DB', 'ChromaDB'], ['Embedding', 'all-MiniLM-L6-v2'],
+              ['Documents', '7 PDFs, 6 countries'], ['Chunk size', '1000 tokens'],
+              ['Overlap', '200 tokens'], ['Confidence threshold', '0.65'],
+              ['Web fallback', 'Serper.dev (Google)'],
+            ].map(([k, v], i) => (
+              <div key={i} className="metric-row"><span>{k}</span><span className="metric-row-model">{v}</span></div>
+            ))}
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-card-label">Countries Covered</div>
+          <div className="metric-card-body">
+            {COUNTRIES.map((c, i) => (
+              <div key={i} className="metric-row">
+                <span>{c.flag} {c.name}</span><span className="metric-row-model">{c.reg}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="metric-card">
+          <div className="metric-card-label">GenAI Concepts</div>
+          <div className="metric-card-body">
+            {[
+              ['Orchestration', 'LangGraph state graph'],
+              ['Memory', 'ConversationSummaryMemory'],
+              ['Prompting', 'Chain-of-thought + structured'],
+              ['Retrieval', 'Hybrid RAG + web fallback'],
+              ['Guardrails', 'Hallucination detection + validation'],
+              ['Routing', 'Multi-LLM intelligent routing'],
+            ].map(([k, v], i) => (
+              <div key={i} className="metric-row"><span>{k}</span><span className="metric-row-model">{v}</span></div>
+            ))}
+          </div>
+        </div>
       </div>
+    </div>
+  );
+}
+
+// ── Root component ─────────────────────────────────────────────────────────────
+
+// Owns all cross-tab state, dark/light theming, and the landing → app transition.
+export default function App() {
+  const [entered, setEntered] = useState(false);
+  const [tab, setTab] = useState('dashboard');
+  const [dark, setDark] = useState(true);
+  const [preloadQuery, setPreloadQuery] = useState(null);
+  const [chatMsgs, setChatMsgs] = useState([]);
+  const [chatBusy, setChatBusy] = useState(false);
+
+  // Dashboard state
+  const [dashResults, setDashResults] = useState({});
+  const [dashLoading, setDashLoading] = useState({});
+
+  // Compare state
+  const [compareResult, setCompareResult] = useState(null);
+  const [compareMeta, setCompareMeta] = useState(null);
+
+  // Architecture state
+  const [archCtx, setArchCtx] = useState('');
+  const [archSaved, setArchSaved] = useState(false);
+  const [archResult, setArchResult] = useState(null);
+  const [archDiagram, setArchDiagram] = useState(null);
+  const [archMeta, setArchMeta] = useState(null);
+  const [archImages, setArchImages] = useState([]);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'loose' });
+  }, [dark]);
+
+  const navigate = (view, query) => {
+    setTab(view);
+    if (query) setPreloadQuery(query);
+  };
+
+  if (!entered) {
+    return <LandingPage onEnter={() => setEntered(true)} dark={dark} setDark={setDark} />;
+  }
+
+  return (
+    <div className="shell">
+      <header className="topbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Zap size={16} style={{ color: 'var(--sage)' }} />
+          <span className="app-title">PM Copilot</span>
+          <span className="tag-multi">Multi-Agent</span>
+        </div>
+        <nav className="tab-nav">
+          {TABS.map(t => {
+            const Icon = t.Icon;
+            return (
+              <button key={t.id} className={`tab-btn ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id)}>
+                <Icon size={14} />
+                <span className="tab-label">{t.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => setDark(!dark)} className="icon-btn">
+            {dark ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+        </div>
+      </header>
+      <main className="main-view">
+        {tab === 'dashboard' && <DashboardView onNavigate={navigate} results={dashResults} setResults={setDashResults} loading={dashLoading} setLoading={setDashLoading} />}
+        {tab === 'compare' && <CompareView result={compareResult} setResult={setCompareResult} meta={compareMeta} setMeta={setCompareMeta} />}
+        {tab === 'arch' && <ArchView ctx={archCtx} setCtx={setArchCtx} saved={archSaved} setSaved={setArchSaved} result={archResult} setResult={setArchResult} diagramResult={archDiagram} setDiagramResult={setArchDiagram} meta={archMeta} setMeta={setArchMeta} uploadedImages={archImages} setUploadedImages={setArchImages} />}
+        {tab === 'chat' && <ChatView preloadQuery={preloadQuery} onConsumePreload={() => setPreloadQuery(null)} msgs={chatMsgs} setMsgs={setChatMsgs} busy={chatBusy} setBusy={setChatBusy} />}
+        {tab === 'metrics' && <MetricsView />}
+      </main>
     </div>
   );
 }

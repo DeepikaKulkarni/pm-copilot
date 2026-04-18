@@ -46,7 +46,8 @@ def parse_supervisor_response(response_text: str) -> dict:
         return result
 
     except (json.JSONDecodeError, KeyError, IndexError):
-        # Fallback: try to infer from keywords
+        # LLM returned malformed JSON — default to tech_stack_explainer which is the
+        # least harmful fallback (it'll just give a generic tech explanation)
         return {
             "primary_agent": "tech_stack_explainer",
             "secondary_agents": [],

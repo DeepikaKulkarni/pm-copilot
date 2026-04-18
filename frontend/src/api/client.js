@@ -1,5 +1,6 @@
 /**
  * API client for communicating with the FastAPI backend.
+ * All requests go through the Vite dev proxy (/api → http://localhost:8000/api).
  */
 import axios from 'axios';
 
@@ -7,11 +8,14 @@ const API_BASE = '/api';
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 120000, // 2 min timeout for LLM calls
+  timeout: 120000, // 2 min — LLM calls with RAG retrieval can be slow
   headers: { 'Content-Type': 'application/json' },
 });
 
+// ── Chat & suggestions ──────────────────────────────────────────────────────
+
 export const chatApi = {
+  // Runs the full LangGraph pipeline: supervisor → specialist agent → guardrails
   sendMessage: async (query, architectureContext = null, conversationHistory = []) => {
     const res = await api.post('/chat', {
       query,
@@ -21,6 +25,7 @@ export const chatApi = {
     return res.data;
   },
 
+  // Returns context-aware starter questions (different when arch context is loaded)
   getSuggestedQuestions: async () => {
     const res = await api.get('/suggested-questions');
     return res.data.questions;
@@ -36,6 +41,9 @@ export const chatApi = {
     return res.data.models;
   },
 };
+
+// ── Architecture context ────────────────────────────────────────────────────
+// The backend holds one global context string; all subsequent chat calls use it.
 
 export const contextApi = {
   setContext: async (context) => {
@@ -54,6 +62,8 @@ export const contextApi = {
   },
 };
 
+// ── Conversation memory ─────────────────────────────────────────────────────
+
 export const conversationApi = {
   getHistory: async () => {
     const res = await api.get('/conversation/history');
@@ -62,6 +72,21 @@ export const conversationApi = {
 
   clear: async () => {
     const res = await api.delete('/conversation/clear');
+    return res.data;
+  },
+};
+
+// ── File upload ─────────────────────────────────────────────────────────────
+// Uses raw axios (not the shared instance) so multipart/form-data isn't overridden.
+
+export const uploadApi = {
+  upload: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await axios.post('/api/upload', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000,
+    });
     return res.data;
   },
 };

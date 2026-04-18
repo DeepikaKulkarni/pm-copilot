@@ -10,9 +10,7 @@ Routing Rationale:
 - Action Plan Agent: Claude Sonnet → Best at structured, stakeholder-ready output generation
 """
 from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from config.settings import OPENAI_API_KEY, GOOGLE_API_KEY
-from config.settings import OPENAI_API_KEY, ANTHROPIC_API_KEY
+from config.settings import OPENAI_API_KEY
 
 
 def get_supervisor_llm():
@@ -46,22 +44,22 @@ def get_architecture_llm():
 
 
 def get_country_readiness_llm():
-    """Gemini for nuanced regulatory/compliance analysis."""
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+    """GPT-4 for nuanced regulatory/compliance analysis."""
+    return ChatOpenAI(
+        model="gpt-4",
         temperature=0.1,
-        google_api_key=GOOGLE_API_KEY,
-        max_output_tokens=3000,
+        api_key=OPENAI_API_KEY,
+        max_tokens=3000,
     )
 
 
 def get_action_plan_llm():
-    """Gemini for structured, stakeholder-ready checklists."""
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.0-flash",
+    """GPT-4 for structured, stakeholder-ready checklists."""
+    return ChatOpenAI(
+        model="gpt-4",
         temperature=0.2,
-        google_api_key=GOOGLE_API_KEY,
-        max_output_tokens=3000,
+        api_key=OPENAI_API_KEY,
+        max_tokens=3000,
     )
 
 # --- LLM Registry for Metrics Tracking ---
@@ -82,13 +80,13 @@ LLM_REGISTRY = {
         "rationale": "Complex multi-service dependency reasoning across tech stacks",
     },
     "country_readiness": {
-    "model": "gemini-2.0-flash",
-    "provider": "Google",
-    "rationale": "Strong regulatory analysis; fast and cost-effective for compliance reasoning",
-},
-"action_plan": {
-    "model": "gemini-2.0-flash",
-    "provider": "Google",
-    "rationale": "Good at producing structured, stakeholder-ready output",
-},
+        "model": "gpt-4",
+        "provider": "OpenAI",
+        "rationale": "Complex regulatory analysis requiring nuanced multi-jurisdictional reasoning",
+    },
+    "action_plan": {
+        "model": "gpt-4",
+        "provider": "OpenAI",
+        "rationale": "Best at producing structured, stakeholder-ready output with clear prioritization",
+    },
 }
