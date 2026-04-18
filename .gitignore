@@ -1,0 +1,23 @@
+cat > .gitignore << 'EOF'
+# Environment
+.env
+venv/
+__pycache__/
+*.pyc
+
+# ChromaDB data
+backend/data/chroma_db/
+data/chroma_db/
+
+# Node
+node_modules/
+dist/
+
+# OS
+.DS_Store
+*.swp
+
+# IDE
+.vscode/
+.idea/
+EOF
