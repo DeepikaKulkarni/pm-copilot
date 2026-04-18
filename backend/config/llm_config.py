@@ -10,9 +10,7 @@ Routing Rationale:
 - Action Plan Agent: Claude Sonnet → Best at structured, stakeholder-ready output generation
 """
 from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
-from config.settings import OPENAI_API_KEY, GOOGLE_API_KEY
-from config.settings import OPENAI_API_KEY, ANTHROPIC_API_KEY
+from config.settings import OPENAI_API_KEY
 
 
 def get_supervisor_llm():
@@ -81,14 +79,14 @@ LLM_REGISTRY = {
         "provider": "OpenAI",
         "rationale": "Complex multi-service dependency reasoning across tech stacks",
     },
-   "country_readiness": {
-    "model": "gpt-4",
-    "provider": "OpenAI",
-    "rationale": "Complex regulatory analysis requiring nuanced multi-jurisdictional reasoning",
-},
-"action_plan": {
-    "model": "gpt-4",
-    "provider": "OpenAI",
-    "rationale": "Best at producing structured, stakeholder-ready output with clear prioritization",
-},
+    "country_readiness": {
+        "model": "gpt-4",
+        "provider": "OpenAI",
+        "rationale": "Complex regulatory analysis requiring nuanced multi-jurisdictional reasoning",
+    },
+    "action_plan": {
+        "model": "gpt-4",
+        "provider": "OpenAI",
+        "rationale": "Best at producing structured, stakeholder-ready output with clear prioritization",
+    },
 }

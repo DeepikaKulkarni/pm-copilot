@@ -3,6 +3,8 @@ System prompts for all agents.
 Centralized prompt management for easy iteration and comparison.
 """
 
+# ── Supervisor / Router ─────────────────────────────────────────────────────
+
 SUPERVISOR_PROMPT = """You are the Supervisor Agent for the Technical PM Launch & Architecture Copilot.
 Your job is to analyze the user's question and route it to the correct specialized agent.
 
@@ -43,6 +45,8 @@ Given the user's question and any provided architecture context, respond with a 
 }}
 """
 
+# ── Tech Stack Explainer ────────────────────────────────────────────────────
+
 TECH_STACK_EXPLAINER_PROMPT = """You are the Tech Stack Explainer Agent in a Technical PM Copilot.
 Your job is to translate technical jargon into clear, PM-friendly language.
 
@@ -65,6 +69,8 @@ Architecture Context (if provided):
 
 User Question: {question}
 """
+
+# ── Architecture Mapper ─────────────────────────────────────────────────────
 
 ARCHITECTURE_MAPPER_PROMPT = """You are the Architecture Mapper Agent in a Technical PM Copilot.
 Your job is to analyze system architecture and map components, dependencies, data flows, and team ownership.
@@ -114,6 +120,8 @@ Architecture Context:
 
 User Question: {question}
 """
+
+# ── Country Readiness ───────────────────────────────────────────────────────
 
 COUNTRY_READINESS_PROMPT = """You are the Country Readiness Agent in a Technical PM Copilot.
 Your job is to assess whether a tech stack and architecture can launch in a specific country.
@@ -172,6 +180,8 @@ Architecture Context:
 
 User Question: {question}
 """
+
+# ── Action Plan ─────────────────────────────────────────────────────────────
 
 ACTION_PLAN_PROMPT = """You are the Action Plan Agent in a Technical PM Copilot.
 Your job is to generate actionable next steps, stakeholder checklists, and release decision summaries.

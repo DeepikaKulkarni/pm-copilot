@@ -268,6 +268,8 @@ code, pre { font-family: var(--mono); }
 .md pre code { background: none; padding: 0; color: var(--tx-1); border: none; }
 .mermaid-box { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 14px; overflow-x: auto; margin: 6px 0; }
 .mermaid-box svg { max-width: 100%; height: auto; }
+.mermaid-box .error-icon { display: none !important; }
+.mermaid-box #d-mmd { display: none; }
 
 /* ══ Mobile responsive ══ */
 @media (max-width: 768px) {

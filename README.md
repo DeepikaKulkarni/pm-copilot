@@ -1,116 +1,187 @@
 # Technical PM Launch & Architecture Copilot
 
-A multi-agent AI copilot that helps Product Managers and Technical PMs understand complex tech stacks, system dependencies, and assess global launch readiness across 6 countries.
+A multi-agent AI copilot for Product Managers. Paste your architecture docs, ask compliance questions, and get stakeholder-ready launch plans — powered by LangGraph, hybrid RAG, and multi-LLM routing.
 
-## Architecture
+---
+
+## System Architecture
 
 ```
-User Query (React Frontend)
-        │
+React Frontend (Vite)
+        │  REST  (axios, /api/*)
         ▼
-   FastAPI Backend
+FastAPI Backend  ──  ConversationSummaryMemory
+        │                   │
+        ▼                   ▼
+ Supervisor Agent      Guardrails
+ (LangGraph)       (hallucination check
+        │           + structure validation)
+        ├──► Tech Stack Explainer Agent  (GPT-4o-mini)
         │
-        ▼
-  Supervisor/Router Agent (LangGraph)
+        ├──► Architecture Mapper Agent   (GPT-4)
+        │         └── Mermaid diagram generation
         │
-        ├──► Tech Stack Explainer Agent
-        │         (GPT-4o-mini / Mistral - fast, cost-effective)
+        ├──► Country Readiness Agent     (GPT-4)
+        │         ├── ChromaDB RAG  ← compliance PDFs
+        │         └── Serper.dev web search (low-confidence fallback)
         │
-        ├──► Architecture Mapper Agent
-        │         (GPT-4 - complex dependency reasoning)
-        │
-        ├──► Country Readiness Agent
-        │         │
-        │         ├──► ChromaDB RAG (primary - curated compliance docs)
-        │         └──► Web Search (fallback - low confidence / recency)
-        │         (Claude - nuanced regulatory analysis + risk severity)
-        │
-        └──► Action Plan Agent
-                  (Claude - structured stakeholder checklists)
+        └──► Action Plan Agent           (GPT-4)
+                  └── Stakeholder checklist + priority matrix
 ```
 
-## Countries Covered
-- 🇺🇸 United States (CCPA/CPRA, HIPAA, sectoral)
-- 🇩🇪 Germany (GDPR + BDSG)
-- 🇮🇳 India (DPDP Act 2023)
-- 🇸🇦 Saudi Arabia (PDPL)
-- 🇧🇷 Brazil (LGPD)
-- 🇸🇬 Singapore (PDPA)
+---
+
+## Features
+
+| Feature | Description |
+|---|---|
+| **Tech Stack Explainer** | Translate engineering jargon into PM-friendly language |
+| **Architecture Mapper** | Component map, dependency graph, Mermaid diagram |
+| **Compliance Analysis** | Launch readiness across 6 markets with risk scores |
+| **Country Comparison** | Side-by-side regulatory diff between any two markets |
+| **Action Plan Generator** | Prioritised checklist with owners and timelines |
+| **File Upload** | PDF extraction (pypdf) + image upload; auto-sent to chat |
+| **Follow-up Chips** | LLM-generated contextual follow-up questions after each answer |
+| **Conversation Memory** | `ConversationSummaryMemory` maintains context across turns |
+| **Guardrails** | Hallucination detection + output structure validation on every response |
+| **Dark / Light mode** | Theme toggle on both landing page and app shell |
+
+---
+
+## Markets Covered
+
+| Country | Regulation |
+|---|---|
+| United States | CCPA / CPRA, HIPAA (sectoral) |
+| Germany | GDPR + BDSG |
+| India | DPDP Act 2023 |
+| Saudi Arabia | PDPL |
+| Brazil | LGPD |
+| Singapore | PDPA |
+
+---
+
+## LLM Routing
+
+| Agent | Model | Reason |
+|---|---|---|
+| Supervisor / Router | GPT-4o-mini | Fast classification, low cost |
+| Tech Stack Explainer | GPT-4o-mini | Summarisation, no heavy reasoning needed |
+| Architecture Mapper | GPT-4 | Complex multi-service dependency reasoning |
+| Country Readiness | GPT-4 | Regulatory nuance, cross-reference with RAG corpus |
+| Action Plan | GPT-4 | Structured stakeholder-ready output |
+
+---
 
 ## Tech Stack
-- **Orchestration**: LangGraph
-- **Vector DB**: ChromaDB
-- **Backend**: FastAPI (Python)
-- **Frontend**: React
-- **LLMs**: OpenAI GPT-4/GPT-4o-mini, Anthropic Claude, Llama/Mistral
-- **Retrieval**: Hybrid RAG + Web Search fallback
+
+**Backend**
+- Python 3.12, FastAPI, Pydantic v2
+- LangGraph (multi-agent orchestration)
+- ChromaDB (vector store), `all-MiniLM-L6-v2` embeddings
+- Serper.dev (web search fallback)
+- pypdf (PDF text extraction for file uploads)
+
+**Frontend**
+- React 18, Vite
+- `react-markdown` + `remark-gfm` (markdown + table rendering)
+- `mermaid` v10 (inline architecture diagrams)
+- `lucide-react` (icons)
+- CSS custom properties (Rubik / DM Mono, olive/sage palette, dark + light themes)
+
+---
+
+## Project Structure
+
+```
+pm-copilot/
+├── backend/
+│   ├── main.py              # FastAPI app, all REST endpoints
+│   ├── graph.py             # LangGraph agent graph definition
+│   ├── memory.py            # ConversationSummaryMemory
+│   ├── guardrails.py        # Hallucination detection + output validation
+│   ├── requirements.txt
+│   ├── start.sh             # Launches uvicorn from the project venv
+│   ├── agents/
+│   │   ├── supervisor.py         # Router — classifies query, picks agent
+│   │   ├── tech_stack_agent.py   # Tech Stack Explainer
+│   │   ├── architecture_agent.py # Architecture Mapper + Mermaid
+│   │   ├── country_agent.py      # Country Readiness + risk scoring
+│   │   └── action_plan_agent.py  # Action Plan Generator
+│   ├── rag/
+│   │   ├── ingest.py        # Ingests compliance PDFs into ChromaDB
+│   │   ├── retriever.py     # Hybrid retrieval + confidence scoring
+│   │   └── web_search.py    # Serper.dev fallback
+│   ├── config/
+│   │   ├── settings.py      # App config, supported countries
+│   │   ├── llm_config.py    # LLM registry + per-agent model selection
+│   │   └── prompts.py       # All agent system prompts (chain-of-thought)
+│   └── data/
+│       └── compliance_docs/ # Curated regulatory PDFs (source for RAG)
+└── frontend/
+    ├── package.json
+    └── src/
+        ├── App.jsx          # All views + lifted state + app shell
+        ├── LandingPage.jsx  # Marketing landing page with dark/light toggle
+        ├── api/
+        │   └── client.js    # Axios wrappers: chatApi, contextApi, uploadApi
+        └── styles/
+            └── index.css    # Full design system (tokens, components, landing)
+```
+
+---
 
 ## Setup
 
+### Prerequisites
+- Python 3.12 (a `venv` inside `backend/` is expected)
+- Node.js 18+
+- API keys: `OPENAI_API_KEY`, `SERPER_API_KEY` (optional)
+
 ### 1. Backend
+
 ```bash
 cd backend
+python3.12 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-# Set environment variables
-cp .env.example .env
-# Edit .env with your API keys
-uvicorn main:app --reload --port 8000
+cp .env.example .env   # add your API keys
 ```
 
-### 2. Frontend
+Start the server (uses the project venv automatically):
+
 ```bash
-cd frontend
-npm install
-npm start
+bash start.sh
+# or: venv/bin/uvicorn main:app --reload --port 8000
 ```
 
-### 3. Load Compliance Documents
+### 2. Load Compliance Documents
+
+Run once to ingest the regulatory PDFs into ChromaDB:
+
 ```bash
 cd backend
 python rag/ingest.py
 ```
 
-## Project Structure
-```
-pm-copilot/
-├── backend/
-│   ├── main.py                    # FastAPI entry point
-│   ├── requirements.txt
-│   ├── .env.example
-│   ├── agents/
-│   │   ├── supervisor.py          # Supervisor/Router agent
-│   │   ├── tech_stack_agent.py    # Tech Stack Explainer
-│   │   ├── architecture_agent.py  # Architecture Mapper + Dependencies
-│   │   ├── country_agent.py       # Country Readiness + Risk Scoring
-│   │   └── action_plan_agent.py   # Action Plan Generator
-│   ├── rag/
-│   │   ├── ingest.py              # Document ingestion pipeline
-│   │   ├── retriever.py           # ChromaDB retrieval + confidence scoring
-│   │   └── web_search.py          # Web search fallback
-│   ├── config/
-│   │   ├── settings.py            # App configuration
-│   │   ├── llm_config.py          # LLM routing configuration
-│   │   └── prompts.py             # All agent system prompts
-│   ├── routes/
-│   │   └── chat.py                # Chat API endpoints
-│   └── data/
-│       └── compliance_docs/       # Curated regulatory documents
-├── frontend/
-│   ├── package.json
-│   └── src/
-│       ├── App.jsx
-│       ├── components/
-│       └── api/
-└── docs/
-    └── architecture_diagram.md
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev   # Vite dev server on http://localhost:5173
 ```
 
-## LLM Routing Rationale
+---
 
-| Agent | Primary LLM | Reasoning |
-|-------|-------------|-----------|
-| Supervisor/Router | GPT-4o-mini | Fast classification, low cost for routing decisions |
-| Tech Stack Explainer | GPT-4o-mini | Summarization doesn't need heavy reasoning |
-| Architecture Mapper | GPT-4 | Complex dependency reasoning across services |
-| Country Readiness | Claude | Nuanced regulatory analysis, careful with compliance |
-| Action Plan Agent | Claude | Best at structured, stakeholder-ready outputs |
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/chat` | Main query endpoint — runs the full agent pipeline |
+| `POST` | `/api/upload` | Upload a PDF or image; returns extracted text / base64 |
+| `GET/POST/DELETE` | `/api/context` | Get, set, or clear the saved architecture context |
+| `GET` | `/api/countries` | List of supported markets |
+| `GET` | `/api/suggested-questions` | Context-aware starter questions |
+| `GET/DELETE` | `/api/conversation/*` | Conversation history and memory summary |
+| `GET` | `/api/health` | Health check |

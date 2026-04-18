@@ -1,3 +1,5 @@
+// Main application component for the Technical PM Launch & Architecture Copilot.
+// All view-level state is lifted here so tab switches don't reset data.
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -10,8 +12,12 @@ import {
 import { chatApi, contextApi, uploadApi } from './api/client';
 import LandingPage from './LandingPage';
 
+// Initialize mermaid once at module load; theme is re-synced on every dark/light toggle.
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
 
+// ── Static config ─────────────────────────────────────────────────────────────
+
+// Maps backend agent_used values → display label + accent colour
 const AGENTS = {
   tech_stack_explainer: { color: 'var(--sky)',   label: 'Tech Stack' },
   architecture_mapper:  { color: 'var(--lilac)', label: 'Architecture' },
@@ -20,6 +26,7 @@ const AGENTS = {
   supervisor:           { color: 'var(--tx-3)',  label: 'Routing' },
 };
 
+// Six markets covered by the compliance RAG corpus
 const COUNTRIES = [
   { code: 'US', name: 'United States', reg: 'CCPA/CPRA', flag: '\u{1F1FA}\u{1F1F8}' },
   { code: 'DE', name: 'Germany',       reg: 'GDPR/BDSG', flag: '\u{1F1E9}\u{1F1EA}' },
@@ -29,6 +36,7 @@ const COUNTRIES = [
   { code: 'SG', name: 'Singapore',     reg: 'PDPA',      flag: '\u{1F1F8}\u{1F1EC}' },
 ];
 
+// Top-level navigation tabs rendered in the app shell header
 const TABS = [
   { id: 'dashboard', label: 'Dashboard',    Icon: LayoutDashboard },
   { id: 'compare',   label: 'Compare',      Icon: GitCompare },
@@ -37,6 +45,7 @@ const TABS = [
   { id: 'metrics',   label: 'Metrics',      Icon: BarChart3 },
 ];
 
+// Capability cards shown on the landing page features section
 const CAPS = [
   { title: 'Tech Stack Explainer',  desc: 'Translate engineering jargon into language any PM can act on',            prompt: 'What is Kubernetes and why does it matter for product managers?', color: 'var(--sky)' },
   { title: 'Architecture Mapper',   desc: 'Surface service dependencies, data flows, and ownership across teams',    prompt: 'What are the key dependencies in a microservices architecture?',  color: 'var(--lilac)' },
@@ -44,18 +53,73 @@ const CAPS = [
   { title: 'Action Plan Generator', desc: 'Build stakeholder checklists and prioritized release-readiness plans',    prompt: 'Generate an action plan for launching in Brazil',                 color: 'var(--coral)' },
 ];
 
+// ── Shared UI primitives ───────────────────────────────────────────────────────
+
+// Renders a mermaid diagram from LLM-generated chart text.
+// Sanitizes common LLM syntax errors before calling mermaid.render(),
+// and falls back to a plain text view if the diagram still fails to parse.
 function Mmd({ chart }) {
   const ref = useRef(null);
-  const id = useRef(`m${Math.random().toString(36).slice(2, 7)}`);
+
   useEffect(() => {
     if (!ref.current || !chart) return;
-    mermaid.render(id.current, chart.trim())
-      .then(({ svg }) => { if (ref.current) ref.current.innerHTML = svg; })
-      .catch(() => { if (ref.current) ref.current.textContent = chart; });
+
+    const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
+
+    // --- Sanitize the chart ---
+    let clean = chart.trim();
+
+    // 1. Strip code fence wrappers the LLM sometimes leaves in
+    clean = clean.replace(/^```mermaid\s*/i, '').replace(/```\s*$/, '').trim();
+
+    // 2. Remove trailing semicolons on the graph declaration line (e.g. "graph TD;")
+    clean = clean.replace(/^(graph\s+\w+)\s*;/gm, '$1');
+
+    // 3. Remove pipe edge-labels entirely (-->|text| → -->) — labels with spaces or
+    //    special chars are a common LLM-generated syntax error
+    clean = clean.replace(/(--[->])\s*\|[^|]*\|/g, '$1');
+
+    // 4. Remove parenthesised content inside square-bracket node labels
+    //    e.g. [Auth Service (Firebase)] → [Auth Service]
+    clean = clean.replace(/\[([^\]]*?)\s*\([^)]*\)\]/g, '[$1]');
+    // Tidy any leftover interior whitespace
+    clean = clean.replace(/\[\s+/g, '[').replace(/\s+\]/g, ']');
+
+    // 5. Remove "style" lines — they often carry hex colours the parser rejects
+    clean = clean.replace(/^\s*style\s+.*/gm, '');
+
+    // 6. Drop blank lines produced by the above passes
+    clean = clean.split('\n').filter(l => l.trim()).join('\n');
+
+    // 7. Ensure valid diagram-type prefix
+    if (!clean.match(/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph)/)) {
+      clean = 'graph TD\n' + clean;
+    }
+
+    const renderDiagram = async () => {
+      try {
+        const { svg } = await mermaid.render(id, clean);
+        if (ref.current) ref.current.innerHTML = svg;
+      } catch (e) {
+        if (ref.current) {
+          // Remove any partial error SVG mermaid may have injected before throwing
+          ref.current.querySelectorAll('.error-icon, #d-mmd').forEach(el => el.remove());
+          ref.current.innerHTML =
+            '<div style="padding:12px;border-radius:6px;background:var(--bg-2);border:1px solid var(--border);overflow-x:auto">' +
+            '<div style="font-size:10px;color:var(--tx-3);margin-bottom:8px;font-weight:500">Architecture Diagram (text view)</div>' +
+            '<pre style="font-size:11px;color:var(--tx-2);white-space:pre-wrap;margin:0">' + chart.replace(/</g, '&lt;') + '</pre></div>';
+        }
+      }
+    };
+
+    renderDiagram();
   }, [chart]);
+
   return <div ref={ref} className="mermaid-box" />;
 }
 
+// Renders markdown with GitHub-Flavored Markdown tables and inline mermaid diagrams.
+// Intercepts ```mermaid code blocks and hands them to <Mmd>.
 function Md({ content }) {
   return (
     <div className="md">
@@ -71,6 +135,7 @@ function Md({ content }) {
   );
 }
 
+// Coloured pill showing HIGH / MEDIUM / LOW launch readiness
 function StatusBadge({ level }) {
   const map = {
     HIGH:   { color: 'var(--green)', bg: 'var(--green-dim)', label: 'Ready' },
@@ -97,6 +162,8 @@ function LoadingCard() {
   );
 }
 
+// Compact row of metadata pills (agent, model, latency, retrieval source, confidence)
+// shown above every assistant response bubble.
 function MetricChips({ data }) {
   const ag = AGENTS[data.agent] || AGENTS.supervisor;
   return (
@@ -114,21 +181,18 @@ function MetricChips({ data }) {
   );
 }
 
-function DashboardView({ onNavigate }) {
-  const [results, setResults] = useState({});
-  const [loading, setLoading] = useState({});
-  const [ctx, setCtx] = useState('');
+// ── View components ────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    contextApi.getContext().then(r => setCtx(r.context || '')).catch(() => {});
-  }, []);
-
+// Runs a per-country compliance analysis for all 6 markets and shows the results
+// in a card grid.  State is lifted to App so it survives tab switches.
+function DashboardView({ onNavigate, results, setResults, loading, setLoading }) {
   const analyzeCountry = async (country) => {
     setLoading(p => ({ ...p, [country.code]: true }));
     try {
+      const ctxData = await contextApi.getContext();
       const r = await chatApi.sendMessage(
         `Assess the launch readiness for ${country.name}. Give a one-line summary, the readiness level (HIGH, MEDIUM, or LOW), and the top 3 blockers. Keep it very concise.`,
-        ctx
+        ctxData.context || ''
       );
       setResults(p => ({
         ...p,
@@ -155,28 +219,6 @@ function DashboardView({ onNavigate }) {
           <Zap size={13} /> Analyze All Markets
         </button>
       </div>
-
-      {Object.keys(results).length === 0 && (
-        <div style={{ padding: 24, borderRadius: 10, background: 'var(--bg-1)', border: '1px solid var(--border)', marginBottom: 16 }}>
-          <h3 style={{ fontSize: 15, fontWeight: 500, color: 'var(--tx-1)', marginBottom: 6 }}>Getting Started</h3>
-          <p style={{ fontSize: 13, color: 'var(--tx-2)', lineHeight: 1.6, marginBottom: 12 }}>
-            Assess launch readiness across 6 global markets. Here's how:
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {[
-              { step: '1', text: 'Click "Analyze All Markets" to run compliance checks on all 6 countries' },
-              { step: '2', text: 'Go to Architecture tab to paste tech stack docs for contextual analysis' },
-              { step: '3', text: 'Use Compare for side-by-side regulatory differences between markets' },
-              { step: '4', text: 'Use Chat for open-ended questions about tech, compliance, or planning' },
-            ].map((s, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <span style={{ fontSize: 11, fontWeight: 600, width: 20, height: 20, borderRadius: 4, background: 'var(--sage-dim)', color: 'var(--sage)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, border: '1px solid var(--sage-border)' }}>{s.step}</span>
-                <span style={{ fontSize: 12, color: 'var(--tx-2)', lineHeight: 1.5 }}>{s.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="country-grid">
         {COUNTRIES.map(c => {
@@ -222,11 +264,11 @@ function DashboardView({ onNavigate }) {
   );
 }
 
-function CompareView() {
+// Side-by-side regulatory comparison between any two of the 6 supported markets.
+// countryA/countryB are kept local (fine to reset on tab switch); result/meta are lifted.
+function CompareView({ result, setResult, meta, setMeta }) {
   const [countryA, setCountryA] = useState('DE');
   const [countryB, setCountryB] = useState('IN');
-  const [result, setResult] = useState(null);
-  const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const compare = async () => {
@@ -281,18 +323,18 @@ function CompareView() {
   );
 }
 
-function ArchView() {
-  const [ctx, setCtx] = useState('');
-  const [saved, setSaved] = useState(false);
-  const [result, setResult] = useState(null);
-  const [diagramResult, setDiagramResult] = useState(null);
-  const [meta, setMeta] = useState(null);
+// Architecture context editor + analyser.
+// Users paste (or upload) architecture docs; the agent returns a component map,
+// dependency analysis, and an optional Mermaid diagram.
+// All state is lifted so context/results persist across tab switches.
+function ArchView({ ctx, setCtx, saved, setSaved, result, setResult, diagramResult, setDiagramResult, meta, setMeta, uploadedImages, setUploadedImages }) {
   const [loading, setLoading] = useState(false);
   const [loadingDiagram, setLoadingDiagram] = useState(false);
-  const [uploadedImages, setUploadedImages] = useState([]);
 
   useEffect(() => {
-    contextApi.getContext().then(r => { if (r.context) { setCtx(r.context); setSaved(true); } }).catch(() => {});
+    if (!ctx) {
+      contextApi.getContext().then(r => { if (r.context) { setCtx(r.context); setSaved(true); } }).catch(() => {});
+    }
   }, []);
 
   const save = async () => { await contextApi.setContext(ctx); setSaved(true); };
@@ -387,6 +429,9 @@ function ArchView() {
   );
 }
 
+// Hidden file input + icon button for uploading PDFs and images into the chat.
+// PDFs are extracted server-side (pypdf) and auto-sent as a text message.
+// Images are base64-encoded and displayed inline in the user bubble.
 function FileUploadBtn({ onFile }) {
   const ref = useRef(null);
   return (
@@ -401,6 +446,9 @@ function FileUploadBtn({ onFile }) {
   );
 }
 
+// Free-form chat view with full message history, follow-up chips, and file upload.
+// preloadQuery lets other views (e.g. Dashboard cards) inject a query and navigate here.
+// msgs/busy are lifted to App so history survives tab switches.
 function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy }) {
   const [inp, setInp] = useState('');
   const endRef = useRef(null);
@@ -552,6 +600,8 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
   );
 }
 
+// Static read-only view documenting the LLM routing decisions, RAG pipeline
+// configuration, supported countries, and GenAI concepts used in the project.
 function MetricsView() {
   return (
     <div className="view-container">
@@ -623,6 +673,9 @@ function MetricsView() {
   );
 }
 
+// ── Root component ─────────────────────────────────────────────────────────────
+
+// Owns all cross-tab state, dark/light theming, and the landing → app transition.
 export default function App() {
   const [entered, setEntered] = useState(false);
   const [tab, setTab] = useState('dashboard');
@@ -630,6 +683,22 @@ export default function App() {
   const [preloadQuery, setPreloadQuery] = useState(null);
   const [chatMsgs, setChatMsgs] = useState([]);
   const [chatBusy, setChatBusy] = useState(false);
+
+  // Dashboard state
+  const [dashResults, setDashResults] = useState({});
+  const [dashLoading, setDashLoading] = useState({});
+
+  // Compare state
+  const [compareResult, setCompareResult] = useState(null);
+  const [compareMeta, setCompareMeta] = useState(null);
+
+  // Architecture state
+  const [archCtx, setArchCtx] = useState('');
+  const [archSaved, setArchSaved] = useState(false);
+  const [archResult, setArchResult] = useState(null);
+  const [archDiagram, setArchDiagram] = useState(null);
+  const [archMeta, setArchMeta] = useState(null);
+  const [archImages, setArchImages] = useState([]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
@@ -671,9 +740,9 @@ export default function App() {
         </div>
       </header>
       <main className="main-view">
-        {tab === 'dashboard' && <DashboardView onNavigate={navigate} />}
-        {tab === 'compare' && <CompareView />}
-        {tab === 'arch' && <ArchView />}
+        {tab === 'dashboard' && <DashboardView onNavigate={navigate} results={dashResults} setResults={setDashResults} loading={dashLoading} setLoading={setDashLoading} />}
+        {tab === 'compare' && <CompareView result={compareResult} setResult={setCompareResult} meta={compareMeta} setMeta={setCompareMeta} />}
+        {tab === 'arch' && <ArchView ctx={archCtx} setCtx={setArchCtx} saved={archSaved} setSaved={setArchSaved} result={archResult} setResult={setArchResult} diagramResult={archDiagram} setDiagramResult={setArchDiagram} meta={archMeta} setMeta={setArchMeta} uploadedImages={archImages} setUploadedImages={setArchImages} />}
         {tab === 'chat' && <ChatView preloadQuery={preloadQuery} onConsumePreload={() => setPreloadQuery(null)} msgs={chatMsgs} setMsgs={setChatMsgs} busy={chatBusy} setBusy={setChatBusy} />}
         {tab === 'metrics' && <MetricsView />}
       </main>
