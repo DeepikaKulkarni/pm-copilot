@@ -73,6 +73,15 @@ architecture_store: dict = {}
 conversation_store: dict = {}
 conversation_memory = ConversationSummaryMemory()
 
+session_metrics = {
+    "total_queries": 0,
+    "agent_usage": {"tech_stack_explainer": 0, "architecture_mapper": 0, "country_readiness": 0, "action_plan": 0},
+    "total_response_time_ms": 0,
+    "retrieval_sources": {"rag": 0, "hybrid": 0, "web_search": 0, "none": 0},
+    "avg_confidence": [],
+    "models_used": {},
+}
+
 
 # --- Follow-up question generator ---
 
@@ -174,10 +183,15 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Query cannot be empty")
 
     try:
+        step_log = []
+        step_log.append({"step": "Query received", "detail": request.query[:80], "timestamp": time.time()})
+
         arch_context = request.architecture_context or architecture_store.get("current")
 
         # Get memory context
         memory_context = conversation_memory.get_context()
+        if memory_context:
+            step_log.append({"step": "Memory loaded", "detail": f"{len(memory_context)} chars of conversation context", "timestamp": time.time()})
 
         # Run through the copilot pipeline
         result = run_copilot(
@@ -185,6 +199,11 @@ async def chat(request: ChatRequest):
             architecture_context=arch_context,
             conversation_history=[memory_context] if memory_context else [],
         )
+
+        step_log.append({"step": "Supervisor routing", "detail": f"Routed to {result.get('agent_used', '?')}", "timestamp": time.time()})
+
+        if result.get("retrieval_source"):
+            step_log.append({"step": "Retrieval", "detail": f"{result['retrieval_source']} (confidence: {result.get('rag_confidence', 0):.0%})", "timestamp": time.time()})
 
         # Update conversation memory
         conversation_memory.add_exchange(
@@ -199,6 +218,7 @@ async def chat(request: ChatRequest):
             result.get("agent_used", "")
         )
         result["follow_up_questions"] = follow_ups
+        step_log.append({"step": "Follow-ups generated", "detail": f"{len(follow_ups)} questions", "timestamp": time.time()})
 
         # Run hallucination detection
         extracted_countries = []
@@ -220,6 +240,23 @@ async def chat(request: ChatRequest):
 
         result["hallucination_check"] = hallucination_check
         result["structure_check"] = structure_check
+        step_log.append({"step": "Guardrails", "detail": f"Confidence: {hallucination_check['confidence_level']}, Grounded: {hallucination_check['is_grounded']}", "timestamp": time.time()})
+
+        result["step_log"] = step_log
+
+        # Update session metrics
+        session_metrics["total_queries"] += 1
+        agent = result.get("agent_used", "unknown")
+        if agent in session_metrics["agent_usage"]:
+            session_metrics["agent_usage"][agent] += 1
+        session_metrics["total_response_time_ms"] += result.get("total_time_ms", 0)
+        src = result.get("retrieval_source", "none") or "none"
+        if src in session_metrics["retrieval_sources"]:
+            session_metrics["retrieval_sources"][src] += 1
+        if result.get("rag_confidence", 0) > 0:
+            session_metrics["avg_confidence"].append(result["rag_confidence"])
+        model = result.get("model_used", "unknown")
+        session_metrics["models_used"][model] = session_metrics["models_used"].get(model, 0) + 1
 
         # Update basic conversation store
         if "history" not in conversation_store:
@@ -300,6 +337,22 @@ async def upload_file(file: UploadFile = File(...)):
         return {"type": "image", "filename": filename, "base64": base64.b64encode(content).decode(), "mime_type": mime}
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: .{ext}")
+
+
+@app.get("/api/metrics")
+async def get_metrics():
+    avg_conf = sum(session_metrics["avg_confidence"]) / len(session_metrics["avg_confidence"]) if session_metrics["avg_confidence"] else 0
+    avg_time = session_metrics["total_response_time_ms"] / session_metrics["total_queries"] if session_metrics["total_queries"] > 0 else 0
+    return {
+        "total_queries": session_metrics["total_queries"],
+        "agent_usage": session_metrics["agent_usage"],
+        "retrieval_sources": session_metrics["retrieval_sources"],
+        "models_used": session_metrics["models_used"],
+        "avg_response_time_ms": round(avg_time, 0),
+        "avg_confidence": round(avg_conf, 3),
+        "memory_turns": conversation_memory.turn_count,
+        "memory_summary_length": len(conversation_memory.summary),
+    }
 
 
 @app.post("/api/export")

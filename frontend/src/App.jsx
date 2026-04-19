@@ -9,7 +9,7 @@ import {
   Zap, BarChart3, GitCompare, MessageSquare, LayoutDashboard, Box,
   Download, AlertTriangle, CheckCircle, XCircle, Loader2, ThumbsUp, ThumbsDown, ExternalLink,
 } from 'lucide-react';
-import { chatApi, contextApi, uploadApi, feedbackApi } from './api/client';
+import { chatApi, contextApi, uploadApi, feedbackApi, metricsApi } from './api/client';
 import LandingPage from './LandingPage';
 
 // Initialize mermaid once at module load; theme is re-synced on every dark/light toggle.
@@ -156,6 +156,27 @@ function Md({ content }) {
   );
 }
 
+// Compact markdown renderer for cards — headings are rendered as bold inline spans
+// at body font size so cards stay uniform regardless of LLM heading usage.
+const COMPACT_HEADING = ({ children }) => (
+  <p style={{ margin: '6px 0 2px', fontWeight: 600, fontSize: 12, color: 'var(--tx-1)' }}>{children}</p>
+);
+function MdCard({ content }) {
+  return (
+    <div className="md md-card">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
+        h1: COMPACT_HEADING, h2: COMPACT_HEADING, h3: COMPACT_HEADING,
+        h4: COMPACT_HEADING, h5: COMPACT_HEADING, h6: COMPACT_HEADING,
+        code({ children, className }) {
+          return <code className={className}>{children}</code>;
+        },
+      }}>
+        {content?.replace(/\n---\n\*.+\*$/, '') || ''}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 // Coloured pill showing HIGH / MEDIUM / LOW launch readiness
 function StatusBadge({ level }) {
   const map = {
@@ -202,23 +223,88 @@ function MetricChips({ data }) {
   );
 }
 
+// ── Product Context Banner ─────────────────────────────────────────────────────
+
+function ProductContextBanner({ productContext, setProductContext }) {
+  const [editing, setEditing] = useState(!productContext);
+  const [draft, setDraft] = useState(productContext);
+
+  useEffect(() => { setDraft(productContext); setEditing(!productContext); }, [productContext]);
+
+  const save = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    setProductContext(trimmed);
+    setEditing(false);
+    try { await contextApi.setContext(trimmed); } catch {}
+  };
+
+  if (!editing && productContext) {
+    return (
+      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--sage)', display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ fontWeight: 700, fontSize: 12, color: 'var(--tx-1)' }}>Product Context</span>
+          </div>
+          <button onClick={() => { setDraft(productContext); setEditing(true); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--sage)', padding: 0 }}>
+            Edit
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--tx-3)', lineHeight: 1.5 }}>
+          {productContext.slice(0, 150)}{productContext.length > 150 ? '…' : ''}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <textarea value={draft} onChange={e => setDraft(e.target.value)}
+        placeholder="Describe your product: What does it do? What data does it collect? What's the tech stack? What markets are you targeting?"
+        style={{ width: '100%', height: 120, fontSize: 12, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--tx-1)', resize: 'vertical', outline: 'none', fontFamily: 'var(--font)', boxSizing: 'border-box' }} />
+      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <button className="btn-primary" onClick={save} disabled={!draft.trim()}>
+          <CheckCircle size={13} /> Save Product Context
+        </button>
+        {productContext && <button className="btn-ghost" onClick={() => setEditing(false)}>Cancel</button>}
+      </div>
+    </div>
+  );
+}
+
 // ── View components ────────────────────────────────────────────────────────────
 
 // Runs a per-country compliance analysis for all 6 markets and shows the results
 // in a card grid.  State is lifted to App so it survives tab switches.
-function DashboardView({ onNavigate, results, setResults, loading, setLoading }) {
+function DashboardView({ onNavigate, results, setResults, loading, setLoading, productContext, setProductContext }) {
+  const [cardFeedback, setCardFeedback] = useState({});
+  const [progress, setProgress] = useState({ total: 0, done: 0, current: '' });
+
+  const handleCardFeedback = async (code, liked) => {
+    setCardFeedback(p => ({ ...p, [code]: liked }));
+    try { await feedbackApi.submit(liked, `Dashboard: ${code}`, 'country_readiness'); } catch {}
+  };
+
   const analyzeCountry = async (country) => {
     setLoading(p => ({ ...p, [country.code]: true }));
     try {
-      const ctxData = await contextApi.getContext();
       const r = await chatApi.sendMessage(
         `Assess the launch readiness for ${country.name}. Give a one-line summary, the readiness level (HIGH, MEDIUM, or LOW), and the top 3 blockers. Keep it very concise.`,
-        ctxData.context || ''
+        productContext || ''
       );
+      let cleanResponse = r.response;
+      cleanResponse = cleanResponse.replace(/^#+\s*Country:.*\n*/gim, '');
+      cleanResponse = cleanResponse.replace(/^#+\s*Launch Readiness:.*\n*/gim, '');
+      cleanResponse = cleanResponse.replace(/^\*\*Country:.*\*\*\n*/gim, '');
+      cleanResponse = cleanResponse.replace(/^\*\*Launch Readiness:.*\*\*\n*/gim, '');
+      cleanResponse = cleanResponse.replace(/^One-line Summary:\s*/gim, '');
+      cleanResponse = cleanResponse.trim();
       setResults(p => ({
         ...p,
         [country.code]: {
-          response: r.response,
+          response: cleanResponse,
           level: r.response.includes('HIGH') ? 'HIGH' : r.response.includes('LOW') ? 'LOW' : 'MEDIUM',
           agent: r.agent_used, model: r.model_used,
           time: r.total_time_ms?.toFixed(0),
@@ -231,14 +317,35 @@ function DashboardView({ onNavigate, results, setResults, loading, setLoading })
     setLoading(p => ({ ...p, [country.code]: false }));
   };
 
-  const analyzeAll = () => COUNTRIES.forEach(c => analyzeCountry(c));
+  const analyzeAll = async () => {
+    setProgress({ total: COUNTRIES.length, done: 0, current: '' });
+    for (let i = 0; i < COUNTRIES.length; i++) {
+      setProgress({ total: COUNTRIES.length, done: i, current: COUNTRIES[i].name });
+      await analyzeCountry(COUNTRIES[i]);
+      setProgress(p => ({ ...p, done: i + 1 }));
+    }
+    setProgress({ total: 0, done: 0, current: '' });
+  };
 
   return (
     <div className="view-container">
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button className="btn-primary" onClick={analyzeAll}>
-          <Zap size={13} /> Analyze All Markets
-        </button>
+      <ProductContextBanner productContext={productContext} setProductContext={setProductContext} />
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn-primary" onClick={analyzeAll} disabled={progress.total > 0}>
+            <Zap size={13} /> Analyze All Markets
+          </button>
+        </div>
+        {progress.total > 0 && (
+          <>
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--tx-3)', marginTop: 6 }}>
+              Analyzing {progress.current}… ({progress.done}/{progress.total})
+            </div>
+          </>
+        )}
       </div>
 
       <div className="country-grid">
@@ -260,20 +367,42 @@ function DashboardView({ onNavigate, results, setResults, loading, setLoading })
               {isLoading ? (
                 <LoadingCard />
               ) : r ? (
-                <div>
-                  <MetricChips data={r} />
-                  <div className="country-card-body"><Md content={r.response} /></div>
-                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                    <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}
-                      onClick={() => onNavigate('chat', `What are the detailed compliance requirements and launch blockers for ${c.name}? Go deeper on each blocker and suggest specific remediation steps.`)}>
-                      <MessageSquare size={12} /> Discuss
-                    </button>
-                    <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}
-                      onClick={() => onNavigate('chat', `Generate a detailed action plan for launching in ${c.name}. Include specific owners, priorities, and timelines.`)}>
-                      <FileText size={12} /> Action Plan
+                r.response?.startsWith('Error:') ? (
+                  <div>
+                    <p style={{ fontSize: 12, color: 'var(--coral)', margin: '0 0 8px' }}>{r.response}</p>
+                    <button className="btn-ghost" onClick={() => analyzeCountry(c)}>
+                      <Loader2 size={11} /> Retry
                     </button>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <MetricChips data={{...r, conf: 0, time: null}} />
+                    <div className="country-card-body"><MdCard content={r.response} /></div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                      <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}
+                        onClick={() => onNavigate('chat', `What are the detailed compliance requirements and launch blockers for ${c.name}? Go deeper on each blocker and suggest specific remediation steps.`)}>
+                        <MessageSquare size={12} /> Discuss
+                      </button>
+                      <button className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}
+                        onClick={() => onNavigate('chat', `Generate a detailed action plan for launching in ${c.name}. Include specific owners, priorities, and timelines.`)}>
+                        <FileText size={12} /> Action Plan
+                      </button>
+                    </div>
+                    <div className="feedback-row" style={{ marginTop: 8 }}>
+                      {cardFeedback[c.code] == null ? (
+                        <>
+                          <span className="feedback-label">Helpful?</span>
+                          <button className="feedback-btn" title="Yes" onClick={() => handleCardFeedback(c.code, true)}><ThumbsUp size={12} /></button>
+                          <button className="feedback-btn" title="No" onClick={() => handleCardFeedback(c.code, false)}><ThumbsDown size={12} /></button>
+                        </>
+                      ) : (
+                        <span className="feedback-done">
+                          {cardFeedback[c.code] ? <><ThumbsUp size={11} /> Thanks!</> : <><ThumbsDown size={11} /> Noted</>}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )
               ) : (
                 <button className="btn-ghost" onClick={() => analyzeCountry(c)}>Analyze {c.name}</button>
               )}
@@ -287,30 +416,54 @@ function DashboardView({ onNavigate, results, setResults, loading, setLoading })
 
 // Side-by-side regulatory comparison between any two of the 6 supported markets.
 // countryA/countryB are kept local (fine to reset on tab switch); result/meta are lifted.
-function CompareView({ result, setResult, meta, setMeta }) {
+function CompareView({ result, setResult, meta, setMeta, productContext, setProductContext }) {
   const [countryA, setCountryA] = useState('DE');
   const [countryB, setCountryB] = useState('IN');
   const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [question, setQuestion] = useState('');
+  const [discussing, setDiscussing] = useState(false);
+  const [followUps, setFollowUps] = useState([]);
+  const [followResult, setFollowResult] = useState(null);
+  const [followMeta, setFollowMeta] = useState(null);
+  const [followFeedback, setFollowFeedback] = useState(null);
 
   const compare = async () => {
     const a = COUNTRIES.find(c => c.code === countryA);
     const b = COUNTRIES.find(c => c.code === countryB);
     if (!a || !b || a.code === b.code) return;
-    setLoading(true); setResult(null);
+    setLoading(true); setResult(null); setFeedback(null); setFollowResult(null); setFollowUps([]);
     try {
-      const ctx = await contextApi.getContext();
       const r = await chatApi.sendMessage(
         `Compare launch readiness between ${a.name} and ${b.name}. Create a detailed side-by-side comparison table covering: regulatory requirements, data residency, cloud infrastructure, breach notification, enforcement penalties, and overall readiness level.`,
-        ctx.context || ''
+        productContext || ''
       );
       setResult(r.response);
       setMeta({ agent: r.agent_used, model: r.model_used, time: r.total_time_ms?.toFixed(0), src: r.retrieval_source, conf: r.rag_confidence || 0 });
+      setFollowUps(r.follow_up_questions || []);
     } catch (e) { setResult(`**Error:** ${e.message}`); }
     setLoading(false);
   };
 
+  const ask = async (q) => {
+    const txt = q || question;
+    if (!txt.trim()) return;
+    setDiscussing(true); setFollowResult(null); setFollowFeedback(null); setQuestion('');
+    const a = COUNTRIES.find(c => c.code === countryA);
+    const b = COUNTRIES.find(c => c.code === countryB);
+    const ctx = `${productContext || ''}\n\nComparison context: ${a?.name} vs ${b?.name}\n\n${result || ''}`.trim();
+    try {
+      const r = await chatApi.sendMessage(txt, ctx);
+      setFollowResult(r.response);
+      setFollowMeta({ agent: r.agent_used, model: r.model_used, time: r.total_time_ms?.toFixed(0), src: r.retrieval_source, conf: r.rag_confidence || 0 });
+      setFollowUps(r.follow_up_questions || []);
+    } catch (e) { setFollowResult(`**Error:** ${e.message}`); }
+    setDiscussing(false);
+  };
+
   return (
     <div className="view-container">
+      <ProductContextBanner productContext={productContext} setProductContext={setProductContext} />
       <div className="compare-controls">
         <div className="select-wrap">
           <label className="select-label">Market A</label>
@@ -338,6 +491,56 @@ function CompareView({ result, setResult, meta, setMeta }) {
         <div className="result-card">
           {meta && <MetricChips data={meta} />}
           <Md content={result} />
+          <div className="feedback-row" style={{ marginTop: 10 }}>
+            {feedback == null ? (
+              <>
+                <span className="feedback-label">Helpful?</span>
+                <button className="feedback-btn" title="Yes" onClick={() => { setFeedback(true); feedbackApi.submit(true, 'compare', 'country_readiness').catch(() => {}); }}><ThumbsUp size={12} /></button>
+                <button className="feedback-btn" title="No" onClick={() => { setFeedback(false); feedbackApi.submit(false, 'compare', 'country_readiness').catch(() => {}); }}><ThumbsDown size={12} /></button>
+              </>
+            ) : (
+              <span className="feedback-done">{feedback ? <><ThumbsUp size={11} /> Thanks!</> : <><ThumbsDown size={11} /> Noted</>}</span>
+            )}
+          </div>
+          {followUps.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 10 }}>
+              {followUps.map((q, i) => <button key={i} className="fuchip" onClick={() => ask(q)}>{q}</button>)}
+            </div>
+          )}
+          <div className="compare-ask" style={{ marginTop: 12 }}>
+            <div className="ibar">
+              <textarea value={question} onChange={e => setQuestion(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } }}
+                placeholder="Ask a follow-up question about this comparison…"
+                className="chat-inp" rows={1} style={{ resize: 'none' }} />
+              <button onClick={() => ask()} className={`sbtn ${question.trim() && !discussing ? 'on' : 'off'}`} disabled={!question.trim() || discussing}>
+                {discussing ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {discussing && <LoadingCard />}
+      {followResult && (
+        <div className="result-card" style={{ marginTop: 10 }}>
+          {followMeta && <MetricChips data={followMeta} />}
+          <Md content={followResult} />
+          <div className="feedback-row" style={{ marginTop: 10 }}>
+            {followFeedback == null ? (
+              <>
+                <span className="feedback-label">Helpful?</span>
+                <button className="feedback-btn" title="Yes" onClick={() => { setFollowFeedback(true); feedbackApi.submit(true, question, 'country_readiness').catch(() => {}); }}><ThumbsUp size={12} /></button>
+                <button className="feedback-btn" title="No" onClick={() => { setFollowFeedback(false); feedbackApi.submit(false, question, 'country_readiness').catch(() => {}); }}><ThumbsDown size={12} /></button>
+              </>
+            ) : (
+              <span className="feedback-done">{followFeedback ? <><ThumbsUp size={11} /> Thanks!</> : <><ThumbsDown size={11} /> Noted</>}</span>
+            )}
+          </div>
+          {followUps.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 10 }}>
+              {followUps.map((q, i) => <button key={i} className="fuchip" onClick={() => ask(q)}>{q}</button>)}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -348,9 +551,16 @@ function CompareView({ result, setResult, meta, setMeta }) {
 // Users paste (or upload) architecture docs; the agent returns a component map,
 // dependency analysis, and an optional Mermaid diagram.
 // All state is lifted so context/results persist across tab switches.
-function ArchView({ ctx, setCtx, saved, setSaved, result, setResult, diagramResult, setDiagramResult, meta, setMeta, uploadedImages, setUploadedImages }) {
+function ArchView({ ctx, setCtx, saved, setSaved, result, setResult, diagramResult, setDiagramResult, meta, setMeta, uploadedImages, setUploadedImages, productContext }) {
   const [loading, setLoading] = useState(false);
   const [loadingDiagram, setLoadingDiagram] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [question, setQuestion] = useState('');
+  const [discussing, setDiscussing] = useState(false);
+  const [followResult, setFollowResult] = useState(null);
+  const [followMeta, setFollowMeta] = useState(null);
+  const [followFeedback, setFollowFeedback] = useState(null);
+  const [followUps, setFollowUps] = useState([]);
 
   useEffect(() => {
     if (!ctx) {
@@ -373,19 +583,36 @@ function ArchView({ ctx, setCtx, saved, setSaved, result, setResult, diagramResu
   };
 
   const analyze = async () => {
-    setLoading(true);
+    setLoading(true); setFeedback(null); setFollowResult(null); setFollowUps([]);
     try {
-      const r = await chatApi.sendMessage('Analyze this architecture. Identify all components, dependencies, team ownership, data flows, and flag any risks or single points of failure.', ctx);
+      const combinedCtx = [productContext, ctx].filter(Boolean).join('\n\n---\n\n');
+      const r = await chatApi.sendMessage('Analyze this architecture. Identify all components, dependencies, team ownership, data flows, and flag any risks or single points of failure.', combinedCtx);
       setResult(r.response);
       setMeta({ agent: r.agent_used, model: r.model_used, time: r.total_time_ms?.toFixed(0), src: r.retrieval_source, conf: r.rag_confidence || 0 });
+      setFollowUps(r.follow_up_questions || []);
     } catch (e) { setResult(`**Error:** ${e.message}`); }
     setLoading(false);
+  };
+
+  const ask = async (q) => {
+    const txt = q || question;
+    if (!txt.trim()) return;
+    setDiscussing(true); setFollowResult(null); setFollowFeedback(null); setQuestion('');
+    const combinedCtx = [productContext, ctx, result].filter(Boolean).join('\n\n---\n\n');
+    try {
+      const r = await chatApi.sendMessage(txt, combinedCtx);
+      setFollowResult(r.response);
+      setFollowMeta({ agent: r.agent_used, model: r.model_used, time: r.total_time_ms?.toFixed(0), src: r.retrieval_source, conf: r.rag_confidence || 0 });
+      setFollowUps(r.follow_up_questions || []);
+    } catch (e) { setFollowResult(`**Error:** ${e.message}`); }
+    setDiscussing(false);
   };
 
   const generateDiagram = async () => {
     setLoadingDiagram(true);
     try {
-      const r = await chatApi.sendMessage('Generate a Mermaid architecture diagram based on the provided context. Show the key components and their connections. Output ONLY the mermaid code block, nothing else.', ctx);
+      const combinedCtx = [productContext, ctx].filter(Boolean).join('\n\n---\n\n');
+      const r = await chatApi.sendMessage('Generate a Mermaid architecture diagram based on the provided context. Show the key components and their connections. Output ONLY the mermaid code block, nothing else.', combinedCtx);
       setDiagramResult(r.response);
     } catch (e) { setDiagramResult(`**Error:** ${e.message}`); }
     setLoadingDiagram(false);
@@ -437,6 +664,51 @@ function ArchView({ ctx, setCtx, saved, setSaved, result, setResult, diagramResu
             <div className="result-card-title">Component Analysis</div>
             {meta && <MetricChips data={meta} />}
             <Md content={result} />
+            <div className="feedback-row" style={{ marginTop: 10 }}>
+              {feedback == null ? (
+                <>
+                  <span className="feedback-label">Helpful?</span>
+                  <button className="feedback-btn" title="Yes" onClick={() => { setFeedback(true); feedbackApi.submit(true, 'arch-analysis', 'architecture_mapper').catch(() => {}); }}><ThumbsUp size={12} /></button>
+                  <button className="feedback-btn" title="No" onClick={() => { setFeedback(false); feedbackApi.submit(false, 'arch-analysis', 'architecture_mapper').catch(() => {}); }}><ThumbsDown size={12} /></button>
+                </>
+              ) : (
+                <span className="feedback-done">{feedback ? <><ThumbsUp size={11} /> Thanks!</> : <><ThumbsDown size={11} /> Noted</>}</span>
+              )}
+            </div>
+            {followUps.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 10 }}>
+                {followUps.map((q, i) => <button key={i} className="fuchip" onClick={() => ask(q)}>{q}</button>)}
+              </div>
+            )}
+            <div style={{ marginTop: 12 }}>
+              <div className="ibar">
+                <textarea value={question} onChange={e => setQuestion(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } }}
+                  placeholder="Ask a follow-up question about this architecture…"
+                  className="chat-inp" rows={1} style={{ resize: 'none' }} />
+                <button onClick={() => ask()} className={`sbtn ${question.trim() && !discussing ? 'on' : 'off'}`} disabled={!question.trim() || discussing}>
+                  {discussing ? <Loader2 size={13} className="spin" /> : <Send size={13} />}
+                </button>
+              </div>
+            </div>
+            {discussing && <LoadingCard />}
+            {followResult && (
+              <div className="result-card" style={{ marginTop: 10 }}>
+                {followMeta && <MetricChips data={followMeta} />}
+                <Md content={followResult} />
+                <div className="feedback-row" style={{ marginTop: 10 }}>
+                  {followFeedback == null ? (
+                    <>
+                      <span className="feedback-label">Helpful?</span>
+                      <button className="feedback-btn" title="Yes" onClick={() => { setFollowFeedback(true); feedbackApi.submit(true, question, 'architecture_mapper').catch(() => {}); }}><ThumbsUp size={12} /></button>
+                      <button className="feedback-btn" title="No" onClick={() => { setFollowFeedback(false); feedbackApi.submit(false, question, 'architecture_mapper').catch(() => {}); }}><ThumbsDown size={12} /></button>
+                    </>
+                  ) : (
+                    <span className="feedback-done">{followFeedback ? <><ThumbsUp size={11} /> Thanks!</> : <><ThumbsDown size={11} /> Noted</>}</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {diagramResult && (
@@ -467,11 +739,23 @@ function FileUploadBtn({ onFile }) {
   );
 }
 
+function BusyBubble({ step }) {
+  return (
+    <div className="row">
+      <div className="bub a loading" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px' }}>
+        <div className="ldot" /><div className="ldot" /><div className="ldot" />
+        <span style={{ fontSize: 11, color: 'var(--tx-3)', fontFamily: 'var(--mono)' }}>{step || 'Processing...'}</span>
+      </div>
+    </div>
+  );
+}
+
 // Free-form chat view with full message history, follow-up chips, and file upload.
 // preloadQuery lets other views (e.g. Dashboard cards) inject a query and navigate here.
 // msgs/busy are lifted to App so history survives tab switches.
-function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy }) {
+function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy, productContext, setProductContext }) {
   const [inp, setInp] = useState('');
+  const [loadingStep, setLoadingStep] = useState('');
   const endRef = useRef(null);
   const inpRef = useRef(null);
   const preloadHandled = useRef(false);
@@ -529,8 +813,13 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
     setMsgs(p => [...p, { role: 'user', content: txt }]);
     setInp('');
     setBusy(true);
+    setLoadingStep('Classifying query...');
+    const t1 = setTimeout(() => setLoadingStep('Routing to agent...'), 1500);
+    const t2 = setTimeout(() => setLoadingStep('Retrieving from knowledge base...'), 3000);
+    const t3 = setTimeout(() => setLoadingStep('Generating response...'), 5000);
+    const t4 = setTimeout(() => setLoadingStep('Running guardrails...'), 8000);
     try {
-      const r = await chatApi.sendMessage(txt);
+      const r = await chatApi.sendMessage(txt, productContext || '');
       setMsgs(p => [...p, {
         role: 'assistant', content: r.response,
         agent: r.agent_used, model: r.model_used,
@@ -538,9 +827,13 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
         src: r.retrieval_source, conf: r.rag_confidence || 0,
         followUps: r.follow_up_questions || [],
         sources: r.sources || [],
+        stepLog: r.step_log || [],
       }]);
     } catch (e) {
       setMsgs(p => [...p, { role: 'assistant', content: `**Error:** ${e.message}`, agent: 'supervisor' }]);
+    } finally {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); clearTimeout(t4);
+      setLoadingStep('');
     }
     setBusy(false);
     inpRef.current?.focus();
@@ -548,6 +841,9 @@ function ChatView({ preloadQuery, onConsumePreload, msgs, setMsgs, busy, setBusy
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ padding: '12px 20px 0', borderBottom: '1px solid var(--border)' }}>
+        <ProductContextBanner productContext={productContext} setProductContext={setProductContext} />
+      </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
         {msgs.length === 0 ? (
           <div className="chat-empty">
@@ -670,6 +966,22 @@ ${bodyHtml}
                       </div>
                     </>
                   )}
+                  {m.stepLog?.length > 0 && (
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ fontSize: 11, color: 'var(--tx-3)', cursor: 'pointer', fontFamily: 'var(--mono)', userSelect: 'none' }}>
+                        View pipeline ({m.stepLog.length} steps)
+                      </summary>
+                      <div style={{ marginTop: 6, padding: 10, borderRadius: 6, background: 'var(--bg-2)', border: '1px solid var(--border)', fontSize: 11, fontFamily: 'var(--mono)' }}>
+                        {m.stepLog.map((s, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: 8, padding: '3px 0', borderBottom: idx < m.stepLog.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                            <span style={{ color: 'var(--sage)', minWidth: 16 }}>{idx + 1}.</span>
+                            <span style={{ color: 'var(--tx-1)', fontWeight: 500, minWidth: 140 }}>{s.step}</span>
+                            <span style={{ color: 'var(--tx-3)' }}>{s.detail}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   {m.followUps?.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 10 }}>
                       {m.followUps.map((q, j) => <button key={j} className="fuchip" onClick={() => send(q)}>{q}</button>)}
@@ -678,14 +990,7 @@ ${bodyHtml}
                 </div>
               </div>
             ))}
-            {busy && (
-              <div className="row">
-                <div className="bub a" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px' }}>
-                  <div className="ldot" /><div className="ldot" /><div className="ldot" />
-                  <span className="meta-text">routing...</span>
-                </div>
-              </div>
-            )}
+            {busy && <BusyBubble step={loadingStep} />}
             <div ref={endRef} />
           </div>
         )}
@@ -708,65 +1013,107 @@ ${bodyHtml}
   );
 }
 
-// Static read-only view documenting the LLM routing decisions, RAG pipeline
-// configuration, supported countries, and GenAI concepts used in the project.
 function MetricsView() {
+  const [metrics, setMetrics] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const fetchMetrics = async () => {
+    setLoading(true);
+    try {
+      const m = await metricsApi.get();
+      setMetrics(m);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchMetrics(); }, []);
+
   return (
     <div className="view-container">
       <div className="view-header">
         <div>
           <h2 className="view-title">System Metrics</h2>
-          <p className="view-desc">Performance monitoring and model usage statistics</p>
+          <p className="view-desc">Live session performance and usage statistics</p>
         </div>
-        <button className="btn-secondary" style={{ color: 'var(--coral)' }}
-          onClick={() => { localStorage.clear(); window.location.reload(); }}>
-          <Trash2 size={13} /> Reset App
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-secondary" onClick={fetchMetrics} disabled={loading}>
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </button>
+          <button className="btn-secondary" style={{ color: 'var(--coral)' }}
+            onClick={() => { localStorage.clear(); window.location.reload(); }}>
+            <Trash2 size={13} /> Reset App
+          </button>
+        </div>
       </div>
+
+      {metrics && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 20 }}>
+          {[
+            { label: 'Total Queries', value: metrics.total_queries },
+            { label: 'Avg Response Time', value: `${metrics.avg_response_time_ms}ms` },
+            { label: 'Avg Confidence', value: `${(metrics.avg_confidence * 100).toFixed(0)}%` },
+            { label: 'Memory Turns', value: metrics.memory_turns },
+          ].map((s, i) => (
+            <div key={i} style={{ padding: 16, borderRadius: 8, background: 'var(--bg-1)', border: '1px solid var(--border)', textAlign: 'center' }}>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--tx-1)', letterSpacing: '-0.5px' }}>{s.value}</div>
+              <div style={{ fontSize: 10, color: 'var(--tx-3)', textTransform: 'uppercase', letterSpacing: '0.5px', marginTop: 4 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="metrics-grid">
         <div className="metric-card">
-          <div className="metric-card-label">LLM Routing</div>
+          <div className="metric-card-label">Agent Usage (This Session)</div>
           <div className="metric-card-body">
-            {[
-              { agent: 'Supervisor', model: 'GPT-4o-mini', reason: 'Fast query classification' },
-              { agent: 'Tech Stack', model: 'GPT-4o-mini', reason: 'Cost-effective summarization' },
-              { agent: 'Architecture', model: 'GPT-4', reason: 'Complex dependency reasoning' },
-              { agent: 'Compliance', model: 'GPT-4', reason: 'Regulatory analysis' },
-              { agent: 'Action Plan', model: 'GPT-4', reason: 'Structured output generation' },
-            ].map((r, i) => (
+            {metrics ? Object.entries(metrics.agent_usage).map(([agent, count], i) => (
               <div key={i} className="metric-row">
-                <span className="metric-row-agent">{r.agent}</span>
-                <span className="metric-row-model">{r.model}</span>
-                <span className="metric-row-reason">{r.reason}</span>
+                <span className="metric-row-agent">{agent.replace(/_/g, ' ')}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, marginLeft: 12 }}>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: 'var(--bg-2)' }}>
+                    <div style={{ width: `${metrics.total_queries > 0 ? (count / metrics.total_queries * 100) : 0}%`, height: '100%', borderRadius: 2, background: 'var(--sage)', transition: 'width 0.3s' }} />
+                  </div>
+                  <span className="metric-row-model">{count}</span>
+                </div>
               </div>
-            ))}
+            )) : <div style={{ fontSize: 12, color: 'var(--tx-3)', padding: '8px 0' }}>Loading…</div>}
           </div>
         </div>
+
         <div className="metric-card">
-          <div className="metric-card-label">RAG Pipeline</div>
+          <div className="metric-card-label">Retrieval Sources</div>
           <div className="metric-card-body">
-            {[
-              ['Vector DB', 'ChromaDB'], ['Embedding', 'all-MiniLM-L6-v2'],
-              ['Documents', '7 PDFs, 6 countries'], ['Chunk size', '1000 tokens'],
-              ['Overlap', '200 tokens'], ['Confidence threshold', '0.65'],
-              ['Web fallback', 'Serper.dev (Google)'],
-            ].map(([k, v], i) => (
-              <div key={i} className="metric-row"><span>{k}</span><span className="metric-row-model">{v}</span></div>
-            ))}
+            {metrics ? (
+              Object.entries(metrics.retrieval_sources).filter(([, v]) => v > 0).length > 0
+                ? Object.entries(metrics.retrieval_sources).filter(([, v]) => v > 0).map(([src, count], i) => (
+                  <div key={i} className="metric-row">
+                    <span>{src === 'hybrid' ? 'RAG + Web Search' : src === 'rag' ? 'RAG Only' : src === 'web_search' ? 'Web Search Only' : 'None'}</span>
+                    <span className="metric-row-model">{count} queries</span>
+                  </div>
+                ))
+                : <div style={{ fontSize: 12, color: 'var(--tx-3)', padding: '8px 0' }}>No retrieval data yet</div>
+            ) : <div style={{ fontSize: 12, color: 'var(--tx-3)', padding: '8px 0' }}>Loading…</div>}
           </div>
         </div>
+
         <div className="metric-card">
-          <div className="metric-card-label">Countries Covered</div>
+          <div className="metric-card-label">Models Used</div>
           <div className="metric-card-body">
-            {COUNTRIES.map((c, i) => (
-              <div key={i} className="metric-row">
-                <span>{c.flag} {c.name}</span><span className="metric-row-model">{c.reg}</span>
-              </div>
-            ))}
+            {metrics ? (
+              Object.keys(metrics.models_used).length > 0
+                ? Object.entries(metrics.models_used).map(([model, count], i) => (
+                  <div key={i} className="metric-row">
+                    <span>{model}</span>
+                    <span className="metric-row-model">{count} calls</span>
+                  </div>
+                ))
+                : <div style={{ fontSize: 12, color: 'var(--tx-3)', padding: '8px 0' }}>No model usage yet</div>
+            ) : <div style={{ fontSize: 12, color: 'var(--tx-3)', padding: '8px 0' }}>Loading…</div>}
           </div>
         </div>
+
         <div className="metric-card">
-          <div className="metric-card-label">GenAI Concepts</div>
+          <div className="metric-card-label">System Architecture</div>
           <div className="metric-card-body">
             {[
               ['Orchestration', 'LangGraph state graph'],
@@ -775,6 +1122,8 @@ function MetricsView() {
               ['Retrieval', 'Hybrid RAG + web fallback'],
               ['Guardrails', 'Hallucination detection + validation'],
               ['Routing', 'Multi-LLM intelligent routing'],
+              ['Vector DB', 'ChromaDB + all-MiniLM-L6-v2'],
+              ['Web Search', 'Serper.dev (Google)'],
             ].map(([k, v], i) => (
               <div key={i} className="metric-row"><span>{k}</span><span className="metric-row-model">{v}</span></div>
             ))}
@@ -811,6 +1160,19 @@ export default function App() {
   const [archDiagram, setArchDiagram] = usePersistedState('pm-arch-diagram', null);
   const [archMeta, setArchMeta] = useState(null);
   const [archImages, setArchImages] = useState([]);
+
+  // Global product context — sent as architecture_context to every API call
+  const [productContext, setProductContext] = usePersistedState('pm-product-ctx', '');
+
+  // Clear stale dashboard results whenever the product context changes
+  const prevProductContext = useRef(productContext);
+  useEffect(() => {
+    if (prevProductContext.current !== productContext) {
+      prevProductContext.current = productContext;
+      setDashResults({});
+      setCompareResult(null);
+    }
+  }, [productContext]);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
@@ -852,10 +1214,10 @@ export default function App() {
         </div>
       </header>
       <main className="main-view">
-        {tab === 'dashboard' && <DashboardView onNavigate={navigate} results={dashResults} setResults={setDashResults} loading={dashLoading} setLoading={setDashLoading} />}
-        {tab === 'compare' && <CompareView result={compareResult} setResult={setCompareResult} meta={compareMeta} setMeta={setCompareMeta} />}
-        {tab === 'arch' && <ArchView ctx={archCtx} setCtx={setArchCtx} saved={archSaved} setSaved={setArchSaved} result={archResult} setResult={setArchResult} diagramResult={archDiagram} setDiagramResult={setArchDiagram} meta={archMeta} setMeta={setArchMeta} uploadedImages={archImages} setUploadedImages={setArchImages} />}
-        {tab === 'chat' && <ChatView preloadQuery={preloadQuery} onConsumePreload={() => setPreloadQuery(null)} msgs={chatMsgs} setMsgs={setChatMsgs} busy={chatBusy} setBusy={setChatBusy} />}
+        {tab === 'dashboard' && <DashboardView onNavigate={navigate} results={dashResults} setResults={setDashResults} loading={dashLoading} setLoading={setDashLoading} productContext={productContext} setProductContext={setProductContext} />}
+        {tab === 'compare' && <CompareView result={compareResult} setResult={setCompareResult} meta={compareMeta} setMeta={setCompareMeta} productContext={productContext} setProductContext={setProductContext} />}
+        {tab === 'arch' && <ArchView ctx={archCtx} setCtx={setArchCtx} saved={archSaved} setSaved={setArchSaved} result={archResult} setResult={setArchResult} diagramResult={archDiagram} setDiagramResult={setArchDiagram} meta={archMeta} setMeta={setArchMeta} uploadedImages={archImages} setUploadedImages={setArchImages} productContext={productContext} />}
+        {tab === 'chat' && <ChatView preloadQuery={preloadQuery} onConsumePreload={() => setPreloadQuery(null)} msgs={chatMsgs} setMsgs={setChatMsgs} busy={chatBusy} setBusy={setChatBusy} productContext={productContext} setProductContext={setProductContext} />}
         {tab === 'metrics' && <MetricsView />}
       </main>
     </div>

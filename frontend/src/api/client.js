@@ -100,4 +100,13 @@ export const uploadApi = {
   },
 };
 
+// ── Session metrics ─────────────────────────────────────────────────────────
+
+export const metricsApi = {
+  get: async () => {
+    const res = await api.get('/metrics');
+    return res.data;
+  },
+};
+
 export default api;
